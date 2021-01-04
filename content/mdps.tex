@@ -1,0 +1,506 @@
+\section{马尔可夫决策过程}
+
+在日常生活中，人们在不断地做着各种各样的决策。而且这些决策通常包含着短期结果和长期结果。有很多决策是单独做出来的，只考虑到了当前能获得的信息，但是又会同时影响今天、明天和后天。如果不综合考虑当前和将来的决策，以及它们会带来的当前和将来的结果，我们可能很难获得一个好的结果。例如，对于一个长跑比赛，如果一开始就冲刺，我们获得一个很高的速度，但是也会消耗大量的能量，最终也只能取得一个比较差的成绩。我们希望研究如何进行最好的决策，来获得一个最好地综合结果。从这里来看，这个问题似乎是矛盾的：即只能依靠当前信息来做决策，又需要最大化一个综合结果。
+
+幸运的是，马尔可夫决策过程给这个问题提供了一个解决思路。马尔可夫决策过程是一个关于随机序列的决策模型。马尔可夫决策过程本身形式上非常简单，并且有非常严谨且充分的数学理论作为基础，所以它的应用非常广泛。其中，强化学习就是基于马尔可夫决策过程发展出的一套学习理论，并且在近些年成功解决了一系列非常复杂的决策问题。本章接下来将介绍一下马尔可夫决策过程，以及在相关的重要结论。
+
+本章节将先从马尔科夫链（Markov Chain， MC）切入，紧接着介绍马尔科夫决策过程（Markov Decision Processes， MDPs）的数学模型，同时揭示马尔科夫链和马尔科夫决策过程关系。然后本章节将介绍两个马尔科夫决策过程的两个重要的等式——贝尔曼等式（Bellman Equaiton）和最优贝尔曼等式（Optimal Bellman Equation），分别用于策略评估（Policy Evaluation）和策略提升（Policy Improvement）。
+
+\subsection{马尔科夫链}
+
+这一小节的目的是为了介绍一下马尔可夫决策过程使用的随机过程模型——马尔科夫链（Markov Chain, MC）。我们将介绍马尔可夫链的数学描述以及一些与马尔科夫决策过程以及强化学习息息相关的数学结论\cite{kass1998markov}。
+
+马尔可夫链是一个离散的随机过程模型。在离散的随机过程模型中，时间被分割成一个个离散的时间点，对应自然数集合$\mathcal{I} = \{0, 1, 2, \ldots, t, \ldots\}$。每个时间点$t \in \mathcal{I}$ 对应一个随机变量 $X_t$。由于时间维度的单向性，我们就得到了一个过程$(X_0, X_1, X_2, \ldots, X_t, \ldots)$。 一个随机过程也可以看作是一个概率空间，它对应的空间中的样本为 $\tau=(x_0, x_1, x_2, \ldots, x_t, \ldots)$，我们称 $\tau$ 为一条\textbf{轨迹}（trajectory)，同时轨迹 $\tau$ 服从某种由随机变量$\{X_t\}$确定的概率分布 $\mathcal{D}$。
+
+我们可以把每一个样本$\tau$张成一个个无穷维的向量，这样一个随机过程对应的概率空间就变成了一个复杂的无穷维的概率空间。通常直接在这种无穷维的概率空间上求解问题非常困难，所以一类随机过程先验性地给这些数据赋予了\textbf{单向性}，来大大降低问题的复杂程度：在一个随机过程中，当 $(X_0 = x_0, X_1 = x_1, \ldots, X_t = x_t, \ldots)$，那么随机变量$X_{t+1}$由过去的信息唯一确定：
+\begin{equation}
+    \mathbf{P}(X_{t+1} \vert X_{t} = x_t, \ldots, X_1 = x_1, X_0 = x_0).
+\end{equation}
+这里的唯一确定性是由时间维度赋予的，也就是贝叶斯公式增加了一个单向性的限制条件。
+
+马尔科夫链则是在单向性上再增加了一个历史无关性，即下一时刻的随机变量只与当前时刻的随机变量有关，与当前时刻以前的随机变量都无关。这样我们就可以引出马尔科夫链的定义：
+\begin{definition}[马尔科夫链]
+    对于一个离散随机过程$(X_0, X_1, \ldots, X_t, \ldots)$，如果满足
+    \begin{equation}
+        \mathbb{P}(X_{t+1} \vert X_0 = x_0,\ldots,X_t = x_t, X_{t+2} = x_{t+2}, \ldots)
+        = \mathbb{P}(X_{t+1} \vert X_t = x_t),
+    \end{equation}
+    那么，我们称这个离散随机过程为马尔科夫链。
+\end{definition}
+
+我们需要更精确的符号来描述一个马尔科夫链。首先我们假设随机变量 $\{X_t\}$ 都是定义在\textbf{状态集合} $\mathcal{X}$ 上的。接着，对于马尔可夫链的一条轨迹$\tau=(x_0, x_1, \ldots, x_t, \ldots)$，它的概率应该满足：
+\begin{equation}
+    \mathbb{P}[\tau= (x_0, x_1, \ldots, x_t, \ldots)] = 
+    \mathbf{p}_0(x_0) \prod^\infty_{t=0} \mathbf{P}(x_{t+1} \vert x_t).
+\end{equation}
+也就是说，确定一条轨迹的概率需要两个概率：\textbf{初始概率分布} $\mathbf{p}_0$与\textbf{状态转移概率分布} $\mathbf{P}$。综上，任意一个马尔科夫链可以由三元组$(\mathcal{X}, \mathbf{p}_0, \mathbf{P})$ 唯一确定。如果 $\mathcal{X} = \{x1, x2, \ldots, x_n\}$，马尔状态转移概率分布可以用矩阵来表示：
+\begin{equation}
+    \mathbf{P} = 
+    \begin{bmatrix}
+        P(x1 \vert x1) & P(x2 \vert x1) & \ldots & P(xn \vert x1) \\
+        P(x1 \vert x2) & P(x2 \vert x2) & \ldots & P(xn \vert x2) \\
+        \vdots & \vdots & \ddots & \vdots \\
+        P(x1 \vert xn) & P(x2 \vert xn) & \ldots & P(xn \vert xn) \\
+    \end{bmatrix}.
+\end{equation}
+注意到状态转移矩阵的每一行和为1。对于任意一个定义在 $\mathcal{X}$ 上的分布 $\mathbf{p}$，$\mathbf{P}^T\mathbf{p}$ 则表示分布 $\mathbf{p}$ 经过一次马尔科夫链状态转移后的分布。 
+
+接着，我们需要介绍一个马尔科夫链中的重要概念——\textbf{稳态分布}。
+\begin{definition}[稳态分布，Stationary Distribution]
+    一个马尔科夫链$(\mathcal{X}, \mathbf{p}_0, \mathbf{P})$，
+    如果存在一个定义在 $\mathcal{X}$ 上的分布 $\mathbf{d}$ 满足
+    \begin{equation}
+        \mathbf{P}^T\mathbf{d} = \mathbf{d},
+    \end{equation}
+    那么，我们称 $\mathbf{d}$ 为这个马尔科夫链的稳态分布。
+\end{definition}
+
+下面的讨论需要用到一个非常重要的矩阵论中的定理——佛罗贝尼乌斯—佩龙定理，所以这里先补充这个定理的相关知识。
+\begin{definition}[可约方阵和不可约方阵]
+    对于$n$阶方阵，如果下标集合$\mathcal{I}=\{1, 2, \ldots, n\}$能够被划分成两个不想交的集合$J$和$K$，使得任意的$j\in J$和$k \in K$都有$a_{jk}=0$，那么方阵$A$就是可约的；否则方阵A就是不可约的。
+\end{definition}
+\begin{theorem}[佛罗贝尼乌斯—佩龙定理，Perron-Frobenius Theorem]
+    如果$\mathbf{A}$是一个不可约的非负方阵时，那么有如下结论：
+    \begin{enumerate}
+        \item $\mathbf{A}$的最大的实数特征值$\lambda_{\max}$和其他特征根$\lambda$满足$\vert \lambda \vert < \lambda_{\max}$；
+        \item $\mathbf{A}$的特征值$\lambda_{\max}$对应的特征向量$\mathbf{x}$方向唯一，并且满足$\mathbf{x} \succ \mathbf{0}$或者$\mathbf{x} \prec \mathbf{0}$。
+    \end{enumerate}
+\end{theorem}
+
+通常，我们会假设马尔科夫链是满足\textbf{不可约}（irreducible）的和\textbf{非周期循环的}(aperiodical)。其中，不可约指的是马尔科夫链的任意一个状态$x \in \mathcal{X}$被访问到的概率大于0（在离散情况下等价为状态转移矩阵$\mathbf{P}$是不可约的）；而非周期循环，指的是所有概率不为零的轨迹$\tau$都不存在循环周期大于1的循环节。这样，就引出了关于稳态分布的一个定理：
+\begin{theorem}[稳态分布的存在性定理]
+    如果马尔可夫链是不可约的与非周期循环的，那么，这条马尔科夫链的稳态分布$\mathbf{d}$一定存在，并且任意初始分布$\mathbf{p}_0$ 经过马尔科夫链的状态转移，最终都会收敛到稳态分布 $\mathbf{d}$上。
+\end{theorem}
+
+\begin{proof}
+    首先，我们需要证明状态转移矩阵 $\mathbf{P}^T$ 存在特征值为1。设 $\mathbf{1}$ 所有维度全部是1的向量，那么根据定义可得 $\mathbf{P} \mathbf{1} = \mathbf{1}$。所以 $\mathbf{P}$ 存在特征值包含1。又因为 $\mathbf{P}$ 和 $\mathbf{P}^T$ 的特征值相同，所以 $\mathbf{P}^T$ 的特征值包含1。
+
+    接着，我们要证明 $\mathbf{P}^T$ 的最大特征值为1。我们设 $\mathbf{P}$ 的特征值为 $\gamma$ 以及对应的特征向量为 $\mathbf{z}$，并且我们设$z_{\max} = \vert z_k \vert = \max_i \vert z_i \vert$。那么，我们有：
+    \begin{equation}
+        \vert \gamma z_{\max} \vert 
+        = \bigg\vert \sum_j \mathbf{P}_{jk} z_j \bigg\vert
+        \le \sum_j \mathbf{P}_{jk} \vert z_j \vert
+        \le \sum_j \mathbf{P}_{jk} z_{\max} \le z_{\max}.
+    \end{equation}
+    因此，我们可得 $\vert \gamma \vert \le 1$，也就是 $\mathbf{P}$ 的最大特征值为1。又因为 $\mathbf{P}$ 和 $\mathbf{P}^T$ 的特征值相同，所以我们可得 $\mathbf{P}^T$的最大特征值为1，也就是说，状态转移矩阵的谱半径为1。
+    
+    这时，我们可以带入佛罗贝尼乌斯—佩龙定理可得，$\mathbf{P}^T$ 存在一个方向唯一且全部为正数的特征向量，它对应的特征值为1。这里也就是说，任意一个不可约的状态转移矩阵都存在一个稳态分布。
+
+    又因为马尔科夫链是非周期循环的，所以我们可知，对于任意初始分布$\mathbf{p}_0$，经过无限次状态转移后，存在收敛分布
+    $\mathbf{p}_{\infty} = \lim_{t \rightarrow \infty} (\mathbf{P}^T)^t \mathbf{p}_0$。
+    根据极限的性质，我们可得 
+    $\mathbf{p}_{\infty} = \mathbf{P}^T \mathbf{p}_{\infty}$。
+    又因为状态转移方程特征值为1的特征向量的方向唯一性，我们可知 
+    $\mathbf{p}_{\infty} = \mathbf{d}$。
+\end{proof}
+
+\begin{remark}
+当马尔可夫链的状态集合不可数时，我们就不方便使用概率分布以及矩阵的形式来表达马尔可夫链，我们转而使用初始状态概率密度$p_0(x_0)$以及状态转移概率密度$p(x_{t+1} \vert x_t)$ 来替换对应的概率分布 $\mathbf{p}_0$ 与 $\mathbf{P}$。同样的，对应的稳态分布概率密度$d$应该满足：
+\begin{equation}
+    d(x_{t+1}) = \int_{x_t \in \mathcal{X}} p(x_{t+1} \vert x_t) d(x_t) \mathrm{d} x_t.
+\end{equation}
+也就是，在一个不可数的状态集合中，马尔科夫链的三元组变为 $(\mathcal{X}, p_0, p)$。
+\end{remark}
+
+经过本小节关于马尔科夫链的介绍，接下来本文可以开始介绍马尔可夫决策过程了。
+
+\subsection{马尔可夫决策过程}
+
+本小节将介绍一下强化学习所使用的基本模型——马尔可夫决策过程（Markov Decision Processes, MDPs），主要涉及到马尔可夫决策过程的基本定义。在后边的小节将展开介绍马尔可夫决策过程相关算法，它们都与强化学习息息相关。
+
+\subsubsection{马尔科夫决策过程的发展历程}
+
+马尔可夫决策过程也被称为序列随机优化、离散随机控制、以及随机动态规划。它的基本目标是：面对一个时间离散的随机系统，我们可以控制它的状态转移，而我们希望能够学到一个针对这个随机系统最好的控制策略。马尔可夫决策过程假设这个系统的状态转移满足马尔可夫性，今后的状态只与当前的状态和动作有关。当前的动作会有一个短期的花销或者奖励，但是马尔可夫决策过程希望能够学到一个长期累计花销小或者奖励值大的控制策略\cite{feinberg2012handbook}。
+
+由于马尔可夫决策过程的实用价值和巧妙的模型思想，吸引了大量的研究。它提供了大量的针对真实世界问题的解决方案，尤其是在商业与工程应用里。从马尔可夫决策过程引发了许多数学与计算的问题。
+
+一部分研究人员从动态规划的角度来理解马尔可夫决策过程，其中贝尔曼等人做出了非常系统性的研究，出版了大量的论文与书籍\cite{bellman1956dynamic,arrow1949bayes,rosling1989optimal,shapley1953stochastic}。整个工作发生在上世纪五十年代就有大量的关于随机动态规划的研究。自从上世纪五十年代开始引出马尔可夫决策过程，科研界产生了大量的深入的理论
+与应用\cite{puterman2014markov,fleming2006controlled,howard1960dynamic,altman1999constrained,bertsekas1995neuro}。事实上，马尔可夫决策过程已经成为一个基本的分析工具，用于分析各种电力系统、控制、以及计算机科学领域的问题。
+
+一直到上世纪八十年代，大部分的工作都集中在最优方程与相关求解算法：策略迭代与值迭代。它们都属于动态规划的范畴。 动态规划通常最大化一个累加的奖励函数，但是无法解决多奖励函数以及附加某些限制的马尔科夫决策过程问题。另外一些工作集中在非直接求解的算法上\cite{wilson2007multi,andreas2017modular,altman1999constrained}，这些方法中，凸分析、线性规划和凸规划等工具经常被使用的。在近些年，研究领域在马尔科夫决策过程中取得了非常大的成功\cite{mnih2013playing,silver2016mastering,schulman2015trust}，人们开始研究多目标马尔可夫决策过程\cite{andreas2017modular}，以及对抗与合作马尔科夫决策过程\cite{hu1998multiagent}。
+
+\subsubsection{马尔可夫决策过程的定义}
+
+我们这里只介绍一种马尔可夫决策过程，使用折扣累加奖励函数的时间无限且离散的马尔可夫决策过程。这种决策过程模型是马尔可夫决策过程模型中使用最为广泛的模型。尤其是在强化学习领域中，我们默认算法所使用的就是这种模型。
+
+所有的离散随机决策过程面对的是一个离散时间动力学系统。和马尔科夫链相同，我们用自然数集合将时间编码为 $\mathcal{I} = \{0, 1, 2, \ldots, t, \ldots\}$。在每个时间节点 $t$ 对应一个\textbf{状态}随机变量 $S_t$，和一个\textbf{动作}随机变量 $A_t$。由于时间的单向性，我们获得了一个随机过程 $(S_0, A_0, S_1, A_1, \ldots, S_t, A_t,\ldots)$。我们可以对一个随机过程进行采样就可以获得一条\textbf{轨迹}:
+\begin{equation}
+    \tau = (s_0, a_0, s_1, a_1, \ldots, s_t, a_t, \ldots).
+\end{equation}
+同样的，对于一个随机过程，我们可以简化它，即要求当前时刻的随机变量只与历史随机变量有关。即我们可以要求 $S_{t+1}$ 和 $A_{t+1}$ 由如下概率分布唯一确定：
+\begin{equation}
+\begin{cases}
+    \mathbf{P}(S_{t+1} \vert S_t = s_t,A_t=a_t,\ldots, S_0 = s_0, A_0 = a_0);\\
+    \mathbf{P}(A_{t+1} \vert S_{t+1}=s_{t+1},S_t = s_t,A_t=a_t,\ldots,
+                                S_0 = s_0, A_0 = a_0).\\
+\end{cases}
+\end{equation}
+其中关于$S_{t+1}$的分布我们称为\textbf{状态转移分布}，是由决策过程唯一确定的；而关于$A_{t+1}$的分布我们称为\textbf{决策分布}或者叫做\textbf{策略函数}，是可以被人为主动选定的。人为选定不同的决策分布，就会产生不同的随机过程，而我们希望能够选到一个特定的
+决策分布，来产生我们希望获得的随机过程。
+
+我们可以通过引入马尔可夫性质，我们可以进一步地简化一个随机过程，得到马尔科夫决策过程。
+\begin{definition}[马尔可夫决策过程，Markov Decision Processes]
+    对于一个随机决策过程
+    \begin{equation}
+        (S_0, A_0, S_1, A_1, \ldots, S_t, A_t,\ldots),
+    \end{equation}
+    如果它的状态转移分布满足：
+    \begin{equation}
+        \begin{aligned}
+        \mathbf{P}(S_{t+1} \vert &S_0 = s_0, A_0 = a_0,\ldots,S_t = s_t,A_t=a_t,\\
+                            &S_{t+2}=s_{t+2}, A_{t+2}=a_{t+2},\ldots)
+        = \mathbf{P}(S_{t+1} \vert S_t=s_t, A_t=a_t),
+        \end{aligned}
+    \end{equation}
+    那么我们称它为马尔可夫决策过程。
+\end{definition}
+
+同样的，我们也可以给策略增加一个马尔可夫性，来获得一个更加简化的随机决策过程：
+
+\begin{definition}[马尔科夫策略，Markov Policy]
+    如果一个策略函数满足
+    \begin{equation} 
+        \begin{aligned}
+            \mathbf{P}(A_{t+1} \vert &S_0 = s_0, A_0 = a_0, \ldots,
+                            S_t = s_t, A_t = a_t, S_{t+1} = s_{t+1},\\
+                            &S_{t+2} = s_{t+2}, A_{t+2} = a_{t+2}\ldots,)
+            = \mathbf{P}(A_{t+1} \vert S_{t+1}=s_{t+1})，
+        \end{aligned}
+    \end{equation}
+    那么我们就称这个策略函数为马尔科夫策略。
+\end{definition}
+
+同样的，我们需要更精细化的描述一个马尔可夫决策过程。首先我们假设状态随机变量$\{S_t\}$ 都是定义在状态集合 $\mathcal{S}$ 上的，并且，我们假设动作随机变量$\{A_t\}$ 都是定义在动作集合 $\mathcal{A}$ 上的。对于一条轨迹$\tau = (s_0, a_0, s_1, a_1,\ldots, s_t, a_t,\ldots)$ ，如果使用马尔可夫策略，那么它对应的概率应该是：
+\begin{equation}
+    \mathbb{P}(\tau) = \mathbf{p}_0(s_0) \prod^{\infty}_{t=0}
+    \pi(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t).
+\end{equation}
+其中 $\mathbf{p}_0$ 是初始状态分布，$\pi$ 是马尔可夫策略， 以及 $\mathbf{P}$ 是状态转移分布。这里策略函数使用符号$\pi$是为了和状态转移分布区别开来，在以后的章节中，我们使用$\pi$ 来专门指代策略函数。因为策略可以由人为任意选定，所以并不是一个马尔可夫决策过程的
+特征量。最终，我们只需要一个四元组就可以唯一确定一个马尔可夫决策过程：$(\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P})$。
+
+值得注意的是，当使用的是某个确定的马尔可夫策略$\pi$时，马尔可夫决策过程就变成了一条马尔可夫链：马尔科夫链的状态集合 $\mathcal{X} = \mathcal{S} \times \mathcal{A}$（笛卡尔积），初始状态分布为 $\mathbf{p}_0[(s_0, a_0)] = \mathbf{p}_0(s_0) \pi(a_0 \vert s_0)$,以及状态转移分布为 $\mathbf{P}[(s_{t+1}, a_{t+1}) \vert (s_t, a_t)] = \pi(a_{t+1} \vert s_{t+1}) \mathbf{P}[s_{t+1} \vert s_t, a_t]$。也就是说，马尔可夫决策过程可以看成是将马尔可夫策略集合映射到某个马尔科夫链集合的一个映射函数。
+
+\subsubsection{马尔科夫决策问题的定义}
+
+在本文中，马尔可夫决策过程在英文中指的是 Markov Decision Processes，而马尔可夫决策问题在英文中指的是Markov Decision Problems，它们的英文缩写都是MDPs。而通常情况下，马尔科夫决策过程是泛指马尔可夫决策过程与马尔可夫决策问题。在本小节，我们将两个概念分开描述，用于强调不同的定义量各自的侧重点。而在本论文的其他部分，我们则使用马尔可夫决策过程来泛指马尔可夫决策过程以及马尔可夫决策问题。
+
+马尔科夫决策过程通常建模的是一个序列问题的客观规律，它们是所面对的问题中不受控制的一部分，反映的是问题自身的特性。继续上面一个小节的讨论，如果马尔可夫决策过程模型是一个从马尔科夫策略集合映射到马尔科夫链集合的映射函数，虽然自变量马尔科夫策略可以随意选定，但是每个马尔
+科夫策略对应的马尔科夫链是不会变化的。
+
+马尔科夫决策问题整体上是对马尔科夫链施加一个评价函数，因此马尔科夫链有了``优'' 与``劣''的差别。马尔科夫决策问题要求出一个策略函数使得我们获得一个最优的马尔科夫链。
+
+评价函数在最优控制的领域表现为损失函数，而在强化学习的领域则表现为奖励函数，我们这里就沿用奖励函数的形式。首先为了简化问题，实际上我们设计了一个马尔可夫奖励函数对马尔科夫链的状态进行编码，它只与马尔可夫链的当前状态有关。
+\begin{definition}[马尔可夫奖励函数]
+    对于马尔可夫链 $(\mathcal{S} \times \mathcal{A}, \mathbf{p}_0, \mathbf{P})$，
+    任意一个定义在 $\mathcal{S} \times \mathcal{A}$ 上因变量为一维实数的奖励函数 $R$
+    都可以作为为它的马尔可夫奖励函数。
+\end{definition}
+
+马尔科夫链的任意一条轨迹 $(s_0, a_0, s_1, a_1, \ldots, s_t, a_t, \ldots)$，都会对应一条数列 $(R(s_0, a_0), R(s_1, a_1), \ldots, R(s_t, a_t), \ldots)$。然而，我们对于一条数列，也无法评价它的好坏，所以我们还需要一个针对数列的评价函数。这里
+我们就介绍一个使用最为广泛的函数——折扣累加函数。
+\begin{definition}[折扣累加函数]
+    对于一条数列 $(a_0, a_1, \ldots, a_t, \ldots)$，我们有折扣累加函数，
+    \begin{equation}
+        discounted[\gamma, (a_0, a_1, \ldots, a_t, \ldots)] = 
+        = \frac{\sum^\infty_{t=0} \gamma^t a_t}{\sum^\infty_{t=0} \gamma^t}
+        = (1 - \gamma)\sum^\infty_{t=0} \gamma^t a_t,
+    \end{equation}
+    将它映射为一个实数，其中 $\gamma$ 为折扣因子。
+\end{definition}
+
+马尔可夫决策过程 $\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}\}$ 加上奖励函数$R(s, a)$ 以及折扣累加函数$discounted(\gamma, \tau)$， 我们就能够获得一个马尔科夫决策问题了。
+\begin{definition}[无限时间折扣马尔科夫决策问题]
+    现在已知马尔可夫决策过程 $\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}\}$，奖励函数 $R(s, a)$，以及折扣累加函数$discounted(\gamma, \tau)$。对于任何一个决策函数 $\pi$，我们标记它对应的马尔科夫链的轨迹为$\tau = (s_0, a_0, s_1, a_1, \ldots, s_t, a_t, \ldots)$。那么，无限时间折扣马尔可夫决策问题就是要求解：
+    \begin{equation}
+        \max_{\pi} \rho(\pi) = (1 - \gamma)
+        \mathbb{E}_{\tau}\left[\sum^\infty_{t=1} \gamma^t r_t\right],
+    \end{equation}
+    其中 $r_t = R(s_t, a_t)$。
+\end{definition}
+
+从定义可知，要精确描述一个无限时间折扣马尔科夫决策问题，我们通常需要一个六元组$(\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma)$。其中使用折扣因子 $\gamma$ 来代指折扣累加函数 $discounted(\gamma, \cdot)$。 同样，如果状态集合与动作集合是不可数的时候，我们使用概率密度函数来替换概率分布函数。也就是说，无限时间折扣马尔可夫决策问题所使用的六元组变为 $(\mathcal{S}, \mathcal{A}, {p}_0, {p}, R, \gamma)$。
+
+\begin{remark}
+对于不同的奖励函数以及不同的数列评价函数，则会对应完全不同的马尔可夫决策问题。我们这里介绍的是本文以及强化学习中广泛使用的模型，同时也为其他类型的马尔科夫决策问题保留了接口，例如：有限平均马尔科夫决策问题。
+\end{remark}
+
+\begin{remark}
+在大部分的强化学习设定中，奖励函数是由随机过程提供的，也因此很容易被认为是随机过程中的某种不变量。但在作者实际的科研过程中发现，对于一个随机过程决策问题，往往是没有奖励函数的，反而是需要研究者通过个人大量的先验知识，设计出一个合适的奖励函数，存在一定的主观色彩。但是，从更高层的视角来看，这种关于奖励函数的先验知识也应该是一个人工智能自主学习的，这也是另一个研究热点，逆强化学习的问题设定。综上，作者认为，奖励函数应该是放在马尔可夫决策问题部分，使马尔科夫决策过程保持客观性。
+\end{remark}
+
+在今后的章节，我们使用泛化的马尔可夫决策过程。并且，大部分情况下，文章中的马尔可夫决策过程就是特指无限时间折扣马尔可夫决策问题。同时，在强化学习部分，我们将使用强化学习的术语来替换本章节的一些名词，例如：我们会使用\textbf{环境}来替换马尔可夫决策过程。具体我们会在
+该章节再做说明。
+
+\subsection{策略评估}
+
+本节着重介绍两个内容\textbf{策略评估}（Policy Evaluation）以及\textbf{贝尔曼等式}（Bellman Equation）。要解决马尔科夫决策问题$\max_{\pi} \rho(\pi)$，我们首先面对的就是一个子问题：给定任意一个马尔可夫策略函数 $\pi$，我们如何获得策略函数预计能得到的折扣累加奖励值 $\rho(\pi)$。这个问题也被叫做\textbf{策略评估}。通过对这个问题的研究，也能得到一个马尔科夫决策过程一个非常重要的概念\textbf{贝尔曼等式}，这个等式是强化学习最为重要的基础之一。
+
+首先，引入一个非常重要的值函数——状态动作价值函数，在强化学习中，也被称为$Q$-函数。
+\begin{definition}[状态动作价值函数、Q函数]
+    首先我们来使用$\mathcal{MDP}$ 来表示一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，其次使用$\pi$来表示一个马尔可夫策略函数，那么马尔可夫决策过程将策略函数映射为一个马尔科夫链$\mathcal{MDP}(\pi)$。令轨迹$\tau = (s_0, a_0, s_1, a_1, \ldots, s_t, a_t, \ldots)$服从分布$\mathcal{MDP}(\pi)$，那么，我们有状态动作价值函数
+    \begin{equation}
+        Q_\pi(s, a) = \mathbb{E}_{\tau \sim \mathcal{MDP}(\pi)}
+        \left[
+        \sum^{\infty}_{t=1} \gamma^t r_t \bigg\vert s_0 = s, a_0 = a    
+        \right],
+    \end{equation}
+    其中$r_t = R(s_t, a_t)$。
+\end{definition}
+$Q$函数是来衡量马尔科夫链$\mathcal{MDP}(\pi)$的轨迹集合中，轨迹开头确定的子集合的奖励值的期望。有了$Q$函数，我们可以简化策略评价函数$\rho(\pi) = \mathbb{E}_{s_0 \sim \mathbf{p}_0, a_0 \sim \pi(s_0)}[Q_\pi(s, a)]$，也就是说，如果能求解一个马尔科夫链的$Q$-函数，我们就能很方便地进行策略评估。
+
+我们首先发现，$Q_\pi$函数存在一个递归的自兼容的结构特性：
+\begin{equation}
+    Q_\pi(s, a) = R(s, a) + \gamma \sum_{s'\in \mathcal{S}}\mathbf{P}(s' \vert s, a)
+    \sum_{a' \in \mathcal{A}} \pi(a' \vert s') Q_\pi(s', a').
+\end{equation}
+这个关系揭示了马尔可夫决策过程的核心特点，是马尔可夫决策过程中的重要概念\textbf{贝尔曼等式}的基础。
+
+要介绍贝尔曼等式，需要先引入一个操作——\textbf{贝尔曼操作}。
+\begin{definition}[贝尔曼操作，Bellman Operator]
+    对于一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$, 以及马尔可夫策略$\pi$，我们可以定义一个基于此的贝尔曼操作：对于任意定义在$\mathcal{S} \times \mathcal{A}$上的函数$Q$，我们可以对它进行一个
+    转换操作，
+    \begin{equation}
+        T_\pi Q(s, a) = R(s, a) + \gamma \sum_{s'\in \mathcal{S}}\mathbf{P}(s' \vert s, a)
+        \sum_{a' \in \mathcal{A}} \pi(a' \vert s') Q(s', a').
+    \end{equation}
+    其中$T_\pi$表示贝尔曼操作，而$T_\pi Q$表示对$Q$进行贝尔曼操作后的结果，显然结果仍然是一个定义在$\mathcal{S}\times\mathcal{A}$上的函数。
+\end{definition}
+
+要引出贝尔曼等式，我们还需要一个先验知识——巴拿赫不动点定理。
+\begin{theorem}[巴拿赫不动点定理，Banach Fixed-point Theorem]
+    如果$U$是一个巴拿赫空间，并且$T:U\rightarrow U$是一个$\gamma$-收缩映射（即对于任意的$\mathbf{u},\mathbf{v}\in U$，满足$\Vert T\mathbf{u} - T\mathbf{v}\Vert \le \gamma \Vert \mathbf{u} - \mathbf{v} \Vert$。并且$\Vert\cdot\Vert$指的是巴拿赫空间$U$使用的范数），其中$\gamma\in(0,1)$是收缩因子。那么
+    \begin{itemize}
+        \item 在空间$U$中，存在唯一的不动点$\mathbf{v}^*$满足$T\mathbf{v}^* = \mathbf{v}^*$；
+        \item 在空间$U$中，对于任意的点$\mathbf{v}_0$，以及递推公式$\mathbf{v}_{n+1} = T\mathbf{v}_n$所形成的数列$(\mathbf{v}_n)$，存在极限 $\lim_{n\rightarrow\infty}\mathbf{v}_n = \mathbf{v}^*$。
+    \end{itemize}
+\end{theorem}
+\begin{proof}
+    首先，我们证明$(\mathbf{v}_n)$是一个柯西序列。
+    对于任意的$m \ge 1$, 
+    \begin{align*}
+        &\Vert \mathbf{v}_{n+m} - \mathbf{v}_n \Vert 
+        \le \sum^{m-1}_{k=0} \Vert \mathbf{v}_{n+k+1} - \mathbf{v}_{n+k}\Vert
+        = \sum^{m-1}_{k=0} \Vert T^{n+k}\mathbf{v}_1 - T^{n+k} \mathbf{v}_0\Vert\\
+        \le& \sum^{m-1}_{k=0} \gamma^{n+k} \Vert \mathbf{v}_1 - \mathbf{v}_0 \Vert
+        = \frac{\gamma^n(1 - \gamma^m)}{1 - \gamma} 
+            \Vert \mathbf{v}_1 - \mathbf{v}_0 \Vert.
+    \end{align*}
+    由上式可知，随着 $n$ 增大，序列$(\mathbf{v}_n)$的元素无限靠近，所以它是一个柯西序列，一定存在一个极限$\mathbf{v}_{\infty} = \lim_{n\rightarrow\infty} \mathbf{v}_n$。又因为空间$U$是一个完全集（巴拿赫空间的性质），所以$\mathbf{v}_{\infty}$ 一定在空间 $U$ 中。
+
+    接着，我们来证明$\mathbf{v}_{\infty}$是收缩映射$T$的不动点。
+    \begin{align*}
+        &\Vert T\mathbf{v}_{\infty} - \mathbf{v}_{\infty} \Vert\\
+        \le& \Vert T\mathbf{v}_{\infty} - \mathbf{v}_{n}\Vert
+        + \Vert \mathbf{v}_n - \mathbf{v}_{\infty} \Vert \\
+        =& \Vert T\mathbf{v}_{\infty} - T \mathbf{v}_{n-1}\Vert
+        + \Vert \mathbf{v}_n - \mathbf{v}_{\infty} \Vert \\
+        \le& \gamma\Vert \mathbf{v}_{\infty} - \mathbf{v}_{n-1}\Vert
+        + \Vert \mathbf{v}_n - \mathbf{v}_{\infty} \Vert 
+    \end{align*}
+    当$n$趋向于无穷时，我们可得 $\Vert T\mathbf{v}_{\infty} - \mathbf{v}_{\infty} \Vert\le 0$。因为范数总是大于0，最终我们可得：$\Vert T\mathbf{v}_{\infty} - \mathbf{v}_{\infty} \Vert = 0$，也就是说$\mathbf{\infty}$是收缩映射$T$的不动点。
+
+    最后，我们再证明收缩映射的不动点是唯一的。假设收缩映射$T$存在两个不动点$\mathbf{u}$和$\mathbf{v}$，那么我们可得：$\Vert\mathbf{u} - \mathbf{v}\Vert = \Vert T \mathbf{u} - T\mathbf{v} \Vert \le \gamma \Vert \mathbf{u} - \mathbf{v} \Vert$。因为 $0 < \gamma < 1$，所以可得$\mathbf{u} = \mathbf{v}$。
+\end{proof}
+
+经过上面的准备，我们终于引出马尔可夫决策过程最关键的一个定理——\textbf{贝尔曼等式}。
+\begin{theorem}[贝尔曼等式，Bellman Equation]\label{thm:bellman-equation}
+    对于一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$, 马尔可夫策略$\pi$，以及定义在$\pi$对应的马尔科夫链上的函数$Q_\pi$和贝尔曼操作$T_\pi$：$Q_\pi$ 是贝尔曼操作唯一的不动点。其中，不动点的关系就叫做贝尔曼等式：
+    \begin{equation}
+        Q_\pi(s, a) = R(s, a) + \gamma \sum_{s'\in \mathcal{S}}\mathbf{P}(s' \vert s, a)
+        \sum_{a' \in \mathcal{A}} \pi(a' \vert s') Q_\pi(s', a').
+    \end{equation}
+    如果我们定义$\pi$对应的马尔科夫链的状态转移矩阵为$\mathbf{P}_\pi[(s', a') \vert (s, a)] = \mathbf{P}(s' \vert s, a)\pi(a' \vert s')$，那么贝尔曼等式也可以等价地写成：
+    \begin{equation}
+        Q_\pi = R + \gamma \mathbf{P}_\pi Q_\pi.
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    首先，根据$Q_\pi$函数的定义，我们可知$Q_\pi$满足上式，所以$Q_\pi$是贝尔曼操作$T_\pi$的不动点。其次，我们只要证明贝尔曼操作是一个收缩映射，我们就可以带入巴拿赫定理证明贝尔曼操作存在唯一的不动点。
+
+    设两个定义在$\mathcal{S}\times\mathcal{A}$上的函数$Q_1$和$Q_2$，有关系：
+    \begin{align*}
+        &\Vert T_\pi Q_1 - T_\pi Q_2 \Vert \\
+        =& \gamma \Vert \mathbf{P}_\pi Q_1 - \mathbf{P}_\pi Q_2 \Vert \\
+        \le& \gamma \Vert Q_1 - Q_2 \Vert.
+    \end{align*}
+    上面这个等式利用了马尔科夫链地状态转移矩阵的谱不大于1的性质。因此，我们得到了贝尔曼操作是一个收缩映射。
+\end{proof}
+
+\begin{remark}
+巴拿赫定理并没有要求映射函数对应的空间是离散的，所以当马尔可夫决策过程的状态集合$\mathcal{S}$和动作集合$\mathcal{A}$是不可数的紧致集时，贝尔曼操作与等式都换成了积分操作，但是依旧满足贝尔曼等式：$Q_\pi$是贝尔曼操作$T_\pi$唯一的不动点。本文为了描述清楚概念，所以都是以状态集合和动作集合是离散并且有限的前提下进行论述的。这些结论很容易就能扩展到连续紧致的马尔可夫决策过程。
+\end{remark}
+
+根据巴拿赫不动点定理，我们已经能够构造出两种算法来进行策略评估：
+\begin{itemize}
+    \item 迭代法：首先任意构造一个定义在$\mathcal{S}\times\mathcal{A}$上的函数$Q_0$。然后不断使用贝尔曼操作来将$Q_n$映射到$Q_{n+1}$。经过多轮迭代后，$Q_t$的变化会越来越小，并且会越来越接近$Q_\pi$。在得到$Q_\pi$后，我们就能够评估出策略函数的价值了。
+    \item 构造损失函数法：构造损失函数$L(Q) = \Vert Q - T_\pi Q \Vert$来求解贝尔曼操作的不动点，获得的不动点就是要求的$Q_\pi$。在得到$Q_\pi$后，我们就能评估出策略函数的价值了。
+\end{itemize}
+这两种方法的具体特性将在后面的章节中讨论到。
+
+\subsection{策略提升}
+
+当然，我们不能只局限于进行策略评估，我们最终还是想要获得最优策略 $\pi^* = \arg\max_\pi \rho(\pi)$。那么如何使策略$\pi$往$\pi^*$的方向提升呢？本节将主要介绍两个内容\textbf{策略提升}（Policy Improvement）和\textbf{最优贝尔曼等式}（Optimal Bellman Equation）。 其中，最优贝尔曼等式是强化学习基本算法Q-Learning的理论基础，可以说是更加重要的一个定理。所以本节会侧重讲解最有贝尔曼等式的推导与理解。
+
+首先我们先确定两个符号：使得奖励值最大的最优策略为$\pi^*$，最优策略对应的值函数为$Q_{\pi^*}$。最优策略以及对应的最优值函数应该满足的结构特性像上一节中一般策略函数与值函数的结构那样直观，我们需要一些迂回的研究策略。
+
+首先，我们直觉性地定义一个贪婪的算子——\textbf{最优贝尔曼操作}。
+\begin{definition}[最优贝尔曼操作，Optimal Bellman Operator]
+    我们可以定义一个基于任意马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优贝尔曼操作：对于任意定义在$\mathcal{S}\times\mathcal{A}$上的函数$Q$，我们可以对它施加一个转换操作，
+    \begin{equation}
+        \begin{aligned}
+            TQ(s, a) =& \max_{\pi} T_\pi Q(s, a)\\
+            =& \max_{\pi}\bigg[ R(s, a) + \gamma \sum_{s'} \mathbf{P}(s' \vert s, a)
+            \sum_{a'} \pi(a' \vert s') Q(s', a')\bigg].
+        \end{aligned}
+    \end{equation}
+    写成矩阵的形式就是$TQ = \max_\pi [R + \gamma \mathbf{P}_{\pi} Q]$， 其中$\mathbf{P}_{\pi}[(s', a') \vert (s, a)] = \mathbf{P}(s' \vert s, a) \pi(a' \vert s')$。
+\end{definition}
+最优贝尔曼操作就是在每一步贝尔曼操作中，取得对当前步骤最有益处的策略进行转换。这是一个贪婪的操作，只关注于如何将当前$Q$值最大化。接下来将介绍这个操作的特性，以及这个操作如何帮助我们学到最优的策略函数$\pi^*$。
+
+首先，最优贝尔曼操作也是一个收缩映射。
+\begin{lemma}
+    基于马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优贝尔曼操作是一个$\gamma$-收缩映射。
+\end{lemma}
+\begin{proof}
+    首先设两个定义在$\mathcal{S}\times\mathcal{A}$上的函数$Q_1$和$Q_2$，$\pi_1 \in \arg\max_{\pi} T_\pi Q_1$ 以及 $\pi_2 \in \arg\max_{\pi} T_{\pi} Q_2$。那么
+    \begin{align*}
+        TQ_1 - TQ_2 =& T_{\pi_1} Q_1 - T_{\pi_2} Q_2\\
+        \preceq& T_{\pi_1} Q_1 - T_{\pi_1} Q_2\\
+        =& \gamma \mathbf{P}_{\pi_1}(Q_1 - Q_2),
+    \end{align*}
+    以及
+    \begin{align*}
+        TQ_2 - TQ_1 =& T_{\pi_2} Q_2 - T_{\pi_1} Q_1\\
+        \preceq& T_{\pi_2} Q_2 - T_{\pi_2} Q_1\\
+        =& \gamma \mathbf{P}_{\pi_2}(Q_2 - Q_1).
+    \end{align*}
+    当$s \in \mathcal{M} = \{s : TQ_1(s) \ge TQ_2(s)\}$时，
+    \begin{equation*}
+        0 \le TQ_1(s) - TQ_2(s) \le \gamma \sum_{s' \in \mathcal{S}}
+        \mathbf{P}_{\pi_1}(s' \vert s) [Q_1(s') - Q_2(s')].
+    \end{equation*}
+    当$s \in \mathcal{N} = \{s : TQ_1(s) < TQ_2(s)\}$时，
+    \begin{equation*}
+        0 \le TQ_2(s) - TQ_1(s) \le \gamma \sum_{s' \in \mathcal{S}}
+        \mathbf{P}_{\pi_2}(s' \vert s) [Q_2(s') - Q_1(s')].
+    \end{equation*}
+    我们人为构建一个状态转移矩阵$\mathbf{P}_{\pi_1, \pi_2}$满足：当$s \in \mathcal{M}$时$\mathbf{P}_{\pi_1, \pi_2}(\cdot \vert s) = \mathbf{P}_{\pi_1}(\cdot \vert s)$；当$s \in \mathcal{N}$时$\mathbf{P}_{\pi_1, \pi_2}(\cdot \vert s) = \mathbf{P}_{\pi_2}(\cdot \vert s)$。那么
+    \begin{align*}
+        \Vert TQ_1 - TQ_2 \Vert \le& \gamma
+        \Vert \mathbf{P}_{\pi_1, \pi_2}(Q_1 - Q_2) \Vert\\
+        \le& \gamma \Vert Q_1 - Q_2 \Vert.
+    \end{align*}
+\end{proof}
+
+因为最优贝尔曼操作是一个$\gamma$-收缩映射，所以我们可以根据巴拿赫不动点定理得知最优贝尔曼操作一定存在一个唯一的不动点$Q^*$。那么，$Q^*$和$Q_{\pi^*}$是什么关系呢？这就是最优贝尔曼等式要解决的问题。
+\begin{theorem}[最优贝尔曼等式，Optimal Bellman Equation]\label{thm:optimal-bellman-equation}
+    设一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，它的策略评价函数为$\rho(\pi)$，它的最优策略为$\pi^* = \arg\max_{\pi} \rho(\pi)$，以及最优策略对应的值函数为$Q_{\pi^*}$。我们有
+    \begin{equation}
+        Q_{\pi^*}(s, a) = \max_{\pi} \bigg[R(s, a) + \gamma \sum_{s'} \mathbf{P}(s' \vert s, a)
+        \sum_{a'} \pi(a' \vert s') Q_{\pi^*}(s, a)\bigg].
+    \end{equation}
+    写成矩阵的形式就是 $Q_{\pi^*} = \max_{\pi} [R + \gamma \mathbf{P}_{\pi} Q_{\pi^*}]$。
+\end{theorem}
+\begin{proof}
+    根据前面的描述，我们仅需要证明的关键步骤就是最优贝尔曼操作的不动点$Q^* = Q_{\pi^*}$。我们证明的整体步骤分为两步：第一步证明当$Q \succeq TQ$时，$Q \succeq Q_{\pi^*}$，第二步证明当$Q \preceq TQ$时，$Q \preceq Q_{\pi^*}$。
+    
+    我们先论述上面两个步骤为什么能够证明$Q^* = Q_{\pi^*}$。我们从定义在$\mathcal{S}\times\mathcal{A}$上的函数集合中找出两类特殊的子集，$\mathcal{M} = \{Q: Q \succeq TQ\}$和$\mathcal{N} = \{Q: Q\preceq TQ\}$。我们将证明集合$\mathcal{M}$中的元素一定都不大于$Q_{\pi^*}$，而集合$\mathcal{N}$中的元素一定都不小于$Q_{\pi^*}$。又因为$\mathcal{M} \cap \mathcal{N} = \{Q: Q = TQ\} = \{Q^*\}$，所以$Q_{\pi^*} \preceq Q^* \preceq Q_{\pi^*}$，即$Q_{\pi^*} = Q^*$。
+
+    首先证明：当$Q \succeq TQ$时，$Q \succeq Q_{\pi^*}$。
+    \begin{align*}
+        Q \succeq& TQ \succeq T_{\pi} Q = R + \gamma \mathbf{P}_{\pi} Q\\
+        \succeq& R + \gamma \mathbf{P}_{\pi} (R + \gamma \mathbf{P}_{\pi} Q)\\
+        &\vdots\\
+        \succeq& \lim_{K \rightarrow \infty} \sum^K_{t = 0} (\gamma \mathbf{P}_{\pi})^tR
+        + (\gamma \mathbf{P}_{\pi})^{K+1} Q\\
+        =& Q_{\pi}.
+    \end{align*}
+    又因为上式对所有的$\pi$都成立，所以也包括最优的策略函数，即$Q \succeq Q_{\pi^*}$。
+
+    接着证明：当$Q \preceq TQ$时，$Q \preceq Q_{\pi^*}$。设$\pi_{Q} = \arg\max_{\pi} R + \gamma \mathbf{P}_{\pi}Q$。那么，
+    \begin{align*}
+        Q \preceq& TQ = R + \gamma \mathbf{P}_{\pi_Q} Q\\
+        \preceq& R + \gamma \mathbf{P}_{\pi_Q}(R + \gamma \mathbf{P}_{\pi_Q} Q)\\
+        &\vdots\\
+        \preceq& \lim_{K \rightarrow \infty} \sum^K_{t = 0} (\gamma\mathbf{P}_{\pi_Q})^t
+        R + (\gamma \mathbf{P}_{\pi_Q})^{K+1}Q = Q_{\pi_Q}\\
+        \preceq& Q_{\pi^*}.
+    \end{align*}
+\end{proof}
+
+我们根据最优贝尔曼等式，就可以构造出两种求解最优策略的方法：
+\begin{itemize}
+    \item 迭代法：构造一个定义在$\mathcal{S}\times\mathcal{A}$上的策略函数$Q_0$。然后，不断使用最优贝尔曼操作来将$Q_n$映射到$Q_{n+1}$。经过多轮迭代后，$Q_{t}$的变化会越来越小，并且会越来越接近$Q^*$。在得到$Q^*$后，再进行一步最优贝尔曼操作，求解$\arg\max_{\pi} R + \gamma \mathbf{P}_{\pi}Q^*$，就能求出最优的策略来。
+    \item 构造损失函数法：构造损失$L(Q) = \Vert Q - TQ \Vert$来求解最优贝尔曼操作的不动点，最终获得的不动点就是$Q^*$。在得到$Q^*$后，再进行 一步最优贝尔曼操作，求解$\arg\max_{\pi} R + \gamma \mathbf{P}_{\pi}Q^*$，就能求出最优的策略来。
+\end{itemize}
+
+这两种方法存在着各自的优势与劣势，具体的特性分析将在后面的章节中讨论。
+
+\subsection{关于广义策略的讨论}
+在前面的章节中，本文默认在马尔科夫策略中讨论马尔科夫决策过程。本小节从两个方向来扩展策略：第一个方向是具有随机性的马尔科夫策略$\pi_{MS}(a_t \vert s_t)$（Markovian Stochastic Policy）退化成确定性的马尔科夫策略$a_t = \pi_{MD}(s_t)$（Markovian Deterministic Policy）；第二个方向是将马尔科夫策略$\pi_{MS}(a_t \vert s_t)$扩展成历史随机策略$\pi_{HS}(a_t \vert s_t, a_{t-1}, \ldots a_0, s_0)$（Historical Stochastic Policy）。 我们将证明，在马尔科夫随机策略集合中找到的最优策略，在马尔科夫确定策略中找到的最优策略，以及在历史随机策略中找的最优策略所能获得的奖励值是一样的。
+
+首先，在策略提升的方法中，本文介绍了使用最优贝尔曼操作来学习一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优策略$\pi^* = \arg\max_{\pi} R + \gamma\mathbf{P}_{\pi}Q^*$。这是一个凸集合上的线性优化问题， 所以它的最优值可以取在凸集合的边界点上，也就是说最优策略可以是$\pi^*(s) \in \arg\max_a Q^*(s, a)$ 的马尔科夫确定策略。所以马尔科夫随机策略集合中找到的最优策略和马尔科夫确定策略集合中找到的最优策略是等价的。
+
+\begin{remark}
+    最优策略的形式也可以是最优马尔可夫确定策略的凸组合形成的马尔可夫随机策略。
+\end{remark}
+
+接着，我们来证明第二个结论。
+
+对于任意的一个历史随机策略$\pi_{HS}(a_t \vert s_t, a_{t-1}, \ldots, a_0, s_0)$，我们可以构造一个与它相关的马尔科夫随机策略
+\begin{equation}
+    \pi_{MS}(a_t \vert s_t)
+    = \int_{\tau_{t-1}=(s_0, a_0, \ldots, s_{t-1}, a_{t-1})}
+    \pi_{HS}(a_t \vert s_t, \tau_{t-1}) \mathrm{d}\tau_{t-1},
+\end{equation}
+并且$\pi_{MS}(a_0 \vert s_0) = \pi_{HS}(a_0 \vert s_0)$。又因为
+\begin{equation}
+    \rho(\pi_{HS}) = \sum_{s_0}\mathbf{p}_0(s_0) \sum_{a_0}
+    \pi_{HS}(a_0 \vert s_0) Q_{\pi_{HS}}(s_0, a_0),
+\end{equation}
+和
+\begin{equation}
+    \rho(\pi_{MS}) = \sum_{s_0}\mathbf{p}_0(s_0) \sum_{a_0}
+    \pi_{MS}(a_0 \vert s_0) Q_{\pi_{MS}}(s_0, a_0),
+\end{equation}
+所以如果对于所有的$s_0, a_0$满足$Q_{\pi_{HS}}(s_0, a_0) = Q_{\pi_{MS}}(s_0, a_0)$的话，那么我们就能证明$\rho(\pi_{HS}) = \rho(\pi_{MS})$。又因为
+\begin{equation}
+    Q_{\pi}(s_0, a_0) = \sum^{\infty}_{t=0} \sum_{s \in \mathcal{S}}
+    \sum_{a \in \mathcal{A}} \gamma^t R(s, a) 
+    \mathbb{P}_{\pi}(S_t = s, A_t = a \vert S_0 = s_0, A_0 = a_0),
+\end{equation}
+所以我们只需要证明：
+\begin{equation}
+    \begin{aligned}
+    \mathbb{P}_{\pi_{HS}}(S_t = s, A_t = a \vert S_0 = s_0, A_0 = a_0)
+    \\= \mathbb{P}_{\pi_{MS}}(S_t = s, A_t = a \vert S_0 = s_0, A_0 = a_0).
+    \end{aligned}
+\end{equation}
+我们使用数学归纳法来证明上式。首先$t=0$必然成立，其次我们假设$t$时成立，那么
+\begin{equation}
+    \begin{aligned}
+        &\mathbb{P}_{\pi_{MS}}(S_{t+1} = s, A_{t+1} = a \vert S_0 = s_0, A_0 = a_0)\\
+        =& \sum_{s', a'}\mathbb{P}_{\pi_{MS}}(S_{t+1} = s, A_{t+1} = a 
+            \vert S_t = s', A_t = a', S_0 = s_0, A_0 = a_0)\\
+        &\cdot\mathbb{P}_{\pi_{MS}}(S_t = s', A_t = a' \vert S_0 = s_0, A_0 = a_0)\\
+        =& \sum_{s', a'}\mathbb{P}_{\pi_{MS}}(S_{t+1} = s, A_{t+1} = a \vert S_t = s', A_t = a')\\
+        &\cdot\mathbb{P}_{\pi_{MS}}(S_t = s', A_t = a' \vert S_0 = s_0, A_0 = a_0)\\
+        =& \sum_{s', a'}\mathbb{P}_{\pi_{HS}}(S_{t+1} = s, A_{t+1} = a 
+        \vert S_t = s', A_t = a')\\
+        &\cdot\mathbb{P}_{\pi_{HS}}(S_t = s', A_t = a' \vert S_0 = s_0, A_0 = a_0)\\
+        =& \mathbb{P}_{\pi_{HS}}(S_{t+1} = s, A_{t+1} = a \vert 
+        S_0 = s_0, A_0 = a_0).
+    \end{aligned}
+\end{equation}
+综上，我们得到了结论：任意一个历史随机策略总能对应一个等效的马尔科夫随机策略，所以
+\begin{equation}
+    \max_{\pi_{HS}}\rho(\pi_{HS}) \le \max_{\pi_{MS}} \rho(\pi_{MS}).
+\end{equation}
+又因为历史随机策略集合包含马尔科夫随机策略集合，所以
+\begin{equation}
+    \max_{\pi_{HS}}\rho(\pi_{HS}) \ge \max_{\pi_{MS}} \rho(\pi_{MS}).
+\end{equation}
+综上所述，可以得到$\max_{\pi_{HS}}\rho(\pi_{HS}) = \max_{\pi_{MS}}\rho(\pi_{MS})$.
+
+\subsection{本章小结}
+本章节主要介绍了强化学习算法所使用的基本数学模型——马尔科夫决策模型。本章节从马尔科夫链切入，介绍了马尔科夫链的基本定义与特性，然后从概率测度的角度阐释了马尔科夫链的本质。接着本文引入了马尔可夫决策过程，将其分成了狭义的马尔科夫决策过程与马尔科夫决策问题两个部分。马尔可夫决策过程描述了一个环境的基本动力学特征，从抽象角度来看，它是将马尔可夫策略函数映射成一个马尔科夫链的泛函映射。接着，本章节介绍了贝尔曼等式与最优贝尔曼等式，分别用于进行策略评估和策略提升。本章节基本奠定了强化学习的理论基础，是非常重要的一个章节。本章节同时补充讨论了马尔可夫随机策略、马尔可夫确定策略和历史随机策略三个集合对应的马尔可夫决策问题的最优价值是等价的，从而证明了在马尔可夫随机策略集合中求解马尔可夫决策问题的合理性，以及揭示了使用马尔可夫确定策略集合来简化马尔可夫决策问题的可能。

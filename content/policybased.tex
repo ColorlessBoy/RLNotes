@@ -1,0 +1,449 @@
+\section{基于策略梯度下降的算法}
+
+在前面的章节中，介绍了马尔科夫决策过程以及两个重要的定理：贝尔曼等式和最优贝尔曼等式。可以根据贝尔曼等式和最优贝尔曼等式直接构造出一系列求解马尔科夫决策过程的算法：值迭代算法、策略迭代算法、修正策略迭代算法和Q-Learning算法，也就是说它们都是基于值函数空间的不动点特性构造的算法。在本小节中，本文将介绍一个全新的思路，通过研究策略空间的特性来构造新的算法。本文将从优化的角度来分析马尔科夫决策问题：对于一个策略$\pi$本文将它的价值函数$\rho(\pi)$看成一个自变量为$\pi$的非凸损失函数。算法先求解出$\rho(\pi)$关于$\pi$的导数，然后使用优化算法（如：梯度下降算法）来优化求解$\rho(\pi)$。
+
+\subsection{随机策略梯度}\label{ss:policy-gradient}
+使用函数参数化策略$\pi$在强化学习中是非常重要的。在\cite{sutton1999policy,sutton2018reinforcement}中提出了一种非常重要的对任意参数化的随机策略$\pi$直接进行优化的方法，它的关键是求出了参数化策略的值函数的梯度。
+
+首先我们声明一些符号声明。针对策略$\pi$，我们可以使用线性函数或者神经网络来参数化它，我们用符号$\theta_\pi$表示函数的参数。那么，对于一个马尔科夫决策过程$\mathcal{MDP} = \{\mathcal{S}, \mathcal{A},\mathbf{p}_0, \mathbf{P}, R, \gamma\}$，我们求解的问题变成了：
+\begin{equation}
+    \max_{\theta_\pi} \rho(\theta_\pi) = 
+    (1 - \gamma) \sum_{s \in \mathcal{S}} \mathbf{p}_0(s) 
+    \sum_{a \in \mathcal{A}} \pi(a \vert s; \theta_\pi) Q(s, a; \theta_\pi),
+\end{equation}
+其中 $\tau = (s_0, a_0, r_1, \ldots, s_t, a_t, r_t, \ldots)$表示马尔科夫决策过程的一条轨迹，
+并且
+\begin{equation}
+    Q(s, a; \theta_\pi) = \mathbb{E}_{\tau \sim \mathcal{MDP}(\theta_\pi)}
+    \bigg[
+        \sum^{\infty}_{t = 0} \gamma^t r_t \bigg\vert s_0 = s, a_0 = a
+    \bigg].
+\end{equation}
+这里需要强调$\rho(\theta_\pi)$只跟参数$\theta_\pi$有关，$Q_{\theta_\pi}$也是由策略函数$\pi$确定的值函数。这一点和上一章基于最优贝尔曼等式的值函数空间的优化算法有非常大的不同。
+
+接着我们需要对策略的值函数求导。随机策略梯度定理提供了一个它经验估计式，使我们可以通过使用当前策略和环境交互获得的样本，来估计当前的梯度。
+\begin{theorem}[随机策略梯度，Stochastic Policy Gradient Theorem]
+    首先，声明一个马尔科夫随机过程$\mathcal{MDP} = \{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$和一个参数化的马尔科夫策略$\theta_\pi$。那么，这个策略的值函数$\rho(\theta_\pi)$的梯度是
+    \begin{equation}
+        \begin{aligned}
+        \frac{\mathrm{d} \rho(\theta_\pi)}{\mathrm{d} \theta_\pi}
+        =& \sum_{s \in \mathcal{S}} \mathbf{p}_{\gamma}(s;\theta_\pi)
+        \sum_{a \in \mathcal{A}} \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d} \theta_\pi} Q(s, a; \theta_\pi) \\
+        =& \mathbb{E}_{s \sim \mathbf{p}_\gamma(\theta_\pi), a \sim \pi(\cdot \vert s; \theta_\pi)}
+        \bigg[\frac{\mathrm{d} \ln \pi(a \vert s; \theta_\pi)}
+        {\mathrm{d} \theta_\pi} Q(s, a; \theta_\pi)\bigg]
+        \end{aligned}
+    \end{equation}
+    其中 $\mathbf{p}_{\gamma}(s;\theta_\pi) = (1 - \gamma) \sum^{\infty}_{t=0}\gamma^t \mathbf{p}_{t}(s; \theta_\pi)$, 以及 $\mathbf{p}_t(s;\theta_\pi)$ 表示轨迹 $\tau \sim \mathcal{MDP}(\theta_\pi)$ 中 $s_t = s$ 出现的可能。
+\end{theorem}
+\begin{proof}
+    \begin{align*}
+        &\frac{\mathrm{d}}{\mathrm{d} \theta_\pi}\rho(\theta_\pi)\\
+        =& \frac{\mathrm{d}}{\mathrm{d} \theta_\pi}(1 - \gamma) \bigg[
+            \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \pi(a \vert s; \theta_\pi) 
+            Q(s, a; \theta_\pi)\bigg]\\
+        =& (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}}{\mathrm{d} \theta_\pi}
+            [\pi(a \vert s; \theta_\pi) 
+            Q(s, a; \theta_\pi)]\\
+        =& (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+            Q(s, a; \theta_\pi)\\
+        & + (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \pi(a \vert s; \theta_\pi)
+            \frac{\mathrm{d}Q(s, a; \theta_\pi)}{\mathrm{d} \theta_\pi}\\
+        =& (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+            Q(s, a; \theta_\pi)\\
+        & + (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \pi(a \vert s; \theta_\pi)\\
+        & \cdot \frac{\mathrm{d}}{\mathrm{d} \theta_\pi}
+            \bigg[ r(s, a) + \gamma \sum_{s' \in \mathcal{S}} 
+            \mathbf{P}(s' \vert s, a) \sum_{a' \in \mathcal{A}} 
+            \pi(a' \vert s'; \theta_\pi) Q(s', a'; \theta_\pi)\bigg]\\
+        =& (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+            Q(s, a; \theta_\pi)\\
+        & + (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} \pi(a \vert s; \theta_\pi)\\
+        & \cdot \gamma \sum_{s' \in \mathcal{S}}
+            \mathbf{P}(s' \vert s, a) \sum_{a' \in \mathcal{A}} 
+        \frac{\mathrm{d}}{\mathrm{d} \theta_\pi}
+            [\pi(a' \vert s'; \theta_\pi) Q(s', a'; \theta_\pi)]\\
+        =& (1 - \gamma) \sum_{s \in \mathcal{S}} 
+            \mathbf{p}_0(s) \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+            Q(s, a; \theta_\pi)\\
+        & + (1 - \gamma)\gamma \sum_{s' \in \mathcal{S}} 
+            \mathbf{p}_1(s') \sum_{a' \in \mathcal{A}} 
+            \frac{\mathrm{d}}{\mathrm{d} \theta_\pi}
+                [\pi(a' \vert s'; \theta_\pi) Q(s', a'; \theta_\pi)]\\
+        \vdots& \\
+        =& (1 - \gamma)\sum_{s \in \mathcal{S}} \sum^{\infty}_{t = 0} 
+            \gamma^t \mathbf{p}_t(s; \theta_\pi)
+            \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+                Q(s, a; \theta_\pi) \\
+        =& \sum_{s \in \mathcal{S}} \mathbf{p}_{\gamma}(s; \theta_\pi)
+            \sum_{a \in \mathcal{A}} 
+            \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+                Q(s, a; \theta_\pi) \\
+        =& \sum_{s \in \mathcal{S}} \mathbf{p}_{\gamma}(s; \theta_\pi)
+            \sum_{a \in \mathcal{A}} \pi(a \vert s; \theta_\pi) 
+            \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi}
+                Q(s, a; \theta_\pi) \\
+        =& \mathbb{E}_{s \sim \mathbf{p}_\gamma, a \sim \pi(\cdot \vert s; \theta_\pi)}
+        \bigg[\frac{\mathrm{d} \ln \pi(a \vert s; \theta_\pi)}
+        {\mathrm{d} \theta_\pi} Q(s, a; \theta_\pi)\bigg].
+    \end{align*}
+\end{proof}
+
+在马尔科夫决策过程模型未知时，我们只能通过采集的轨迹来探知环境。随机策略梯度公式暗示了一个经验估计式，来使我们能够在模型未知的设定下，使用随机梯度下降等算法来求解最优策略。当我们能够使用策略$\pi_{\theta_\pi}$从环境中采集一系列样本$\{(s_i, a_i)\}^m_{i=1}$，那么策略梯度的无偏估计为：
+\begin{equation}
+    \frac{\mathrm{d} \rho(\theta_\pi)}{\mathrm{d} \theta_\pi}
+    \approx \frac{1}{m} \sum^m_{i=1} 
+    \frac{\mathrm{d} \log \pi(a_i \vert s_i; \theta_\pi)}
+        {\mathrm{d} \theta_\pi} Q(s_i, a_i; \theta_\pi).
+\end{equation}
+我们暂时遇到了两个问题：如何获得值函数$Q(s, a; \theta_\pi)$, 以及怎么从分布$\mathbf{p}_{\gamma}$中采集样本$s$。后面我们将解决这两个问题，不过本文会先介绍一个修正的策略梯度公式，有助于后面的讨论。
+
+\subsection{优势策略梯度公式}
+
+使用原本的策略梯度的无偏估计时，我们往往会遇到梯度估计的方差过大的问题。要解决策略梯度的方差过大的问题，我们可以增大每一次采样的数量，但是也增加了算法的样本复杂度。本节将介绍一种策略梯度的变形——优势随机策略梯度（Advantage Stochastic Policy Gradient）\cite{greensmith2004variance,mnih2016asynchronous,grosse2016kronecker}，实现在相同的样本数量的前提下，大大降低梯度估计值的方差。
+
+因为对于任意的状态$s$，满足$\sum_{a \in \mathcal{A}} \pi(a \vert s; \theta_\pi) = 1$，因此
+\begin{equation}
+    \sum_{a\in\mathcal{A}} \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}
+    {\mathrm{d} \theta_\pi} = 0.
+\end{equation}
+那么，对于任意一个定义在$\mathcal{S}$上的函数$b(s)$，满足
+\begin{equation}
+    \sum_{s \in \mathcal{S}} \mathbf{p}_{\gamma}(s; \theta_\pi) 
+    \sum_{a \in \mathcal{A}} 
+    \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d} \theta_\pi} b(s) = 0.
+\end{equation}
+
+将上面的结论带入到策略梯度公式中可得：
+\begin{equation}
+\begin{aligned}
+    \frac{\mathrm{d}\rho(\theta_\pi)}{\mathrm{d} \theta_\pi}
+    =& \sum_{s} \mathbf{p}_{\gamma}(s;\theta_\pi) \sum_{a} 
+        \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi} 
+        [Q(s, a; \theta_\pi) - b(s)]\\
+    =& \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \left\{ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)]
+    \right\}.
+\end{aligned}
+\end{equation}
+在策略梯度公式中，我们称$b(s)$为\textbf{基准}函数（Baseline Function）。
+
+接下来我们来研究一下这个修改过后的策略梯度公式在什么情况下能够降低方差。首先这个策略梯度的方差为：
+\begin{align*}
+    \sigma(b) =& Var_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \left\{
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)]
+    \right\} \\
+    =& \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \left\{ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)]
+    \right\}^2 \\
+    & -\left\{\mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+        \left[ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)] \right]
+    \right\}^2 \\
+    =& \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \left\{ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)]
+    \right\}^2 \\
+    & -\left\{\mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+        \left[ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        Q(s, a; \theta_\pi) \right]
+    \right\}^2.
+\end{align*}
+
+接下来我们来研究不同的$b(s)$对策略梯度的方差的影响。首先定义：
+\begin{equation}
+    \sigma_{\theta_\pi}(b) = 
+    \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_\pi), 
+        a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \left\{ 
+        \frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}     
+        [Q(s, a; \theta_\pi) - b(s)]
+    \right\}^2.
+\end{equation}
+接着，我们求解问题$\min_b \sigma_{\theta_\pi}(b)$，来获取最优的基准函数$b^*(s; \theta_\pi)$。因为这是一个简单的二次优化问题，很容易可得：
+\begin{equation}
+    b^*(s; \theta_\pi) = 
+        \frac{ \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left(\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right)^2 Q(s, a; \theta_\pi)}
+        {\sum_{a} \pi(a \vert s; \theta_\pi)
+        \left(\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right)^2}.
+\end{equation}
+到此，我们可以看到$b^*(s; \theta_\pi)$非常复杂，接下来我们使用一个相对简单好求的等价的函数来替换$b^*(s;\theta_\pi)$。
+
+这里需要介绍马尔科夫决策过程中另一个相对重要的值函数——\textbf{状态值函数}（Value Function）：
+\begin{equation}
+    \label{equ:state-value-function}
+    V(s; \theta_\pi) = \sum_{a \in \mathcal{A}} \pi(a \vert s; \theta_\pi) 
+    Q(s, a; \theta_\pi).
+\end{equation}
+在形式上，状态值函数$V(s; \theta_\pi)$ 比最优基准函数$b^*(s;\theta_\pi)$要简单得多。接着，我们研究一下使用$V(s; \theta_\pi)$作为基准函数时策略梯度的方差和最优方差的关系:
+\begin{align*}
+    &\sigma_{\theta_\pi}(V_{\theta_\pi}) - \sigma_{\theta_\pi}(b^*_{\theta_\pi}) \\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi) \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2 \\
+        & (V(s; \theta_\pi) - b^*(s;\theta_\pi))
+        (V(s; \theta_\pi) + b^*(s;\theta_\pi) - 2 Q(s, a; \theta_\pi)) \\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi)(V(s; \theta_\pi) - b^*(s;\theta_\pi)) \\
+        &\bigg(\sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2V(s; \theta_\pi) \\
+        & + \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2 b^*(s;\theta_\pi) \\
+        & - 2 \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2Q(s, a; \theta_\pi)\bigg) \\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi)(V(s; \theta_\pi) - b^*(s;\theta_\pi)) \\
+        &\bigg(\sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2V(s; \theta_\pi) \\
+        & - \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}
+        {\mathrm{d}\theta_\pi}\right]^2 b^*(s;\theta_\pi) \bigg)\\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi) \sum_{a} \pi(a \vert s; \theta_\pi)
+        \left[\frac{\mathrm{d}\ln\pi(a \vert s; \theta_\pi)}{\mathrm{d}\theta_\pi}\right]^2 
+        (V(s; \theta_\pi) - b^*(s;\theta_\pi))^2\\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi) \mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}
+    [\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2 
+        (V(s; \theta_\pi) - b^*(s;\theta_\pi))^2\\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi) 
+    \frac{1}
+    {\mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}
+    [\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2} \\
+    &\cdot\{\mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}[\nabla_{\theta_\pi} 
+    \ln \pi(a \vert s; \theta_\pi)]^2 V(s;\theta_\pi)\\
+    & \quad - \mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}
+    [[\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2 b^*(s;\theta_\pi) \}^2\\
+    =& \sum_{s} \mathbf{p}_{\gamma}(s; \theta_\pi) 
+    \frac{1}
+    {\mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}
+    [\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2} \\
+    &\cdot\{\mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}[\nabla_{\theta_\pi} 
+    \ln \pi(a \vert s; \theta_\pi)]^2 \cdot 
+    \mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)} 
+    [Q(s, a; \theta_\pi)] \\
+    & \quad - \mathbb{E}_{a\sim\pi(\cdot \vert s; \theta_\pi)}
+    [[\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2 Q(s, a; \theta_\pi)] \}^2.
+\end{align*}
+那么，如果随机变量$[\nabla_{\theta_\pi} \ln \pi(a \vert s; \theta_\pi)]^2$和随机变量$Q(s, a; \theta_\pi)$独立时,可知$\sigma_{\theta_\pi}(V_{\theta_\pi}) - \sigma_{\theta_\pi}(b^*_{\theta_\pi}) \approx 0$。
+
+我们定义\textbf{优势函数}（Advantage Function）为:
+\begin{equation}
+    A(s, a; \theta_\pi) = Q(s, a; \theta_\pi) - V(s; \theta_\pi).
+\end{equation}
+那么，带基准函数的策略梯度公式就变成了\textbf{优势策略梯度公式}:
+\begin{equation}
+    \begin{aligned}
+    \frac{\mathrm{d} \rho(\theta_\pi)}{\mathrm{d} \theta_\pi}
+    =& \sum_{s \in \mathcal{S}} \mathbf{p}_{\gamma}(s)
+    \sum_{a \in \mathcal{A}} \frac{\mathrm{d}\pi(a \vert s; \theta_\pi)}
+    {\mathrm{d} \theta_\pi} A(s, a; \theta_\pi) \\
+    =& \mathbb{E}_{s \sim \mathbf{p}_\gamma, a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \bigg[\frac{\mathrm{d} \ln \pi(a \vert s; \theta_\pi)}
+    {\mathrm{d} \theta_\pi} A(s, a; \theta_\pi)\bigg].
+    \end{aligned}
+\end{equation}
+相比于原始的策略梯度公式，优势策略梯度公式的方差大大降低，在使用样本估计策略梯度的优化算法中有显著的优势。
+
+\subsection{优势函数的估计}
+
+本节我们将解决 \ref{ss:policy-gradient} 小节中提出的第一个问题：如何求解当前策略对应的状态动作值函数$Q(s, a; \theta_\pi)$？等进一步，如何求解当前策略对应的优势函数$A(s, a; \theta_\pi)$？
+
+综合前文的随机策略梯度，我们可得：
+\begin{equation}
+    \begin{aligned}
+    \frac{\mathrm{d} \rho(\theta_\pi)}{\mathrm{d} \theta_\pi}
+    =& \mathbb{E}_{s \sim \mathbf{p}_\gamma, a \sim \pi(\cdot \vert s; \theta_\pi)}
+    \bigg[\frac{\mathrm{d} \ln \pi(a \vert s; \theta_\pi)}
+    {\mathrm{d} \theta_\pi} \Phi(s, a; \theta_\pi)\bigg].
+    \end{aligned}
+\end{equation}
+其中$\Phi$代指当前策略函数对应的状态动作值函数$Q(s, a; \theta_\pi)$或者优势函数$A(s, a; \theta_\pi)$。
+
+假设我们使用当前策略与环境交互获得了$m$条轨迹样本
+\begin{equation}
+\{(s^{(i)}_0, a^{(i)}_0, r^{(i)}_0, s^{(i)}_1, a^{(i)}_1, r^{(i)}_1, \ldots, s^{(i)}_t, a^{(i)}_t, r^{(i)}_t, \ldots)\}^m_{i=1}。
+\end{equation}
+通常我们使用如下方式来估计$\Phi(s, a; \theta_\pi)$：
+\begin{enumerate}
+    \item 蒙特卡洛估计（Monto Carlo，MC）：$\Phi(s^{(i)}_t, a^{(i)}_t) = \sum^{\infty}_{t'=t} \gamma^{t' - t} r^{(i)}_{t'}$；
+    \item 状态动作值函数的差分估计（Temporal-difference，TD）：初始化一个估计函数$Q(s, a; \theta_Q)$，然后求解贝尔曼等式构造的优化目标
+    \begin{equation}\label{equ:td-state-action-function}
+    \min_{\theta_Q} \sum^{m}_{i=1} \sum^{\infty}_{t=0}[r^{(i)}_t + \gamma Q(s^{(i)}_{t+1}, a^{(i)}_{t+1}; \theta_Q) - Q^{(i)}(s^{(i)}_t, a^{(i)}_t; \theta_Q)]^2,
+    \end{equation}
+    最后的估计值为$\Phi(s^{(i)}_t, a^{(i)}_t) = Q(s^{(i)}_t, a^{(i)}_t; \theta_Q)$;
+    \item 优势函数的差分估计：初始化一个估计函数$V(s; \theta_V)$，并使用如下优化目标
+    \begin{equation}\label{equ:td-state-function}
+    \min_{\theta_V} \sum^{m}_{i=1} \sum^{\infty}_{t=0}[r^{(i)}_t + \gamma V(s^{(i)}_{t+1}; \theta_V) - V(s^{(i)}_t; \theta_V)]^2，
+    \end{equation}
+    最后使用如下式来估计优势函数：
+    \begin{equation}
+        \Phi(s^{(i)}_t, a^{(i)}_t) = r^{(i)}_t + \gamma V(s^{(i)}_{t+1};\theta_V) - V(s^{(i)}_t;\theta_V);
+    \end{equation}
+    \item 泛化优势函数估计（Generalized Advantage Estimation，GAE）\cite{schulman2015high}：初始化一个估计函数$V(s; \theta_V)$，并使用\eqref{equ:td-state-function}式来估计它，最后使用如下式来估计泛化优势函数
+    \begin{equation}
+        \Phi(s^{(i)}_t, a^{(i)}_t) = \sum^{\infty}_{t'=t}\lambda^{t'-t}[r^{(i)}_{t'} + \gamma V(s^{(i)}_{t'+1};\theta_V) - V(s^{(i)}_{t'};\theta_V)],
+    \end{equation}
+    其中$\lambda\in(0, \gamma)$是一个选定的超参数。
+\end{enumerate}
+
+前面三个估计器比较直观，不需要做进一步的阐述。最后一个估计器用到了奖励值重塑技术，本文将做进一步的阐述。
+
+首先介绍一下\textbf{奖励值重塑技术}（Reward Shaping, RS）\cite{ng1999policy}。对于一个马尔科夫决策问题，我们非常关心轨迹样本
+\begin{equation}
+    (s_0, a_0, r_0, s_1, a_1, r_1, \ldots, s_t, a_t, r_t, \ldots)  
+\end{equation}
+的累计奖励函数
+\begin{equation}
+    \sum^{\infty}_{t=0} \gamma^t r_t.
+\end{equation}
+奖励值重塑技术提供了一种修改奖励值$r$但是策略值保持不变的泛式：给定任意一个定义在状态集合$\mathcal{S}$上的函数$F: \mathcal{S} \rightarrow \mathbb{R}$，奖励值重塑技术将奖励函数变为：
+\begin{equation}
+    rs(s, a, s') = r(s, a) + \gamma F(s') - F(s).
+\end{equation}
+使用重塑奖励函数后，累计奖励函数变为
+\begin{equation}\label{equ:rs-policy-function}
+    \begin{aligned}
+        \rho_{rs}(\theta_\pi) 
+        =&\sum^{\infty}_{t=0} \gamma^t rs(s_t, a_t, s_{t+1})\\
+        =& \lim_{K \rightarrow \infty}
+            \sum^{K}_{t=0} \gamma^t rs(s_t, a_t, s_{t+1})\\
+        =& \lim_{K \rightarrow \infty}
+            \sum^{K}_{t=0} \gamma^t [r_t + \gamma F(s_{t+1}) - F(s_t)]\\
+        =& \lim_{K \rightarrow \infty}
+            \sum^{K}_{t=0} \gamma^t r_t + \gamma^{K+1} F(s_{K+1}) - F(s_0)\\
+        =&\sum^{\infty}_{t=0} \gamma^t r_t - F(s_0) = \rho(\theta_\pi) - F(s_0).
+    \end{aligned}
+\end{equation}
+从\eqref{equ:rs-policy-function}式可知，对于同一条轨迹，重塑奖励函数对应的累计奖励值只是原奖励函数对应的累计奖励值减去一个与策略无关的项$F(s_0)$。那么重塑奖励函数对应的马尔科夫决策问题的最优策略和原奖励函数对应的马尔科夫决策问题的最优策略是相同的。
+
+泛化优势函数选择$F(s) = V(s; \theta_\pi)$，因此重塑奖励函数就变成了
+\begin{equation}
+ rs(s, a, s'; \theta_\pi) = r(s, a) + \gamma V(s'; \theta_\pi) - V(s; \theta_\pi).
+\end{equation}
+而这个重塑奖励函数关于$s'$的期望就是优势函数：
+\begin{equation}
+    A(s, a; \theta_\pi) = \mathbb{E}_{s' \sim \mathbf{P}(\cdot \vert s, a)}
+    [rs(s, a, s; \theta_\pi)].
+\end{equation}
+那么泛化优势函数估计使用的模型其实是将原马尔科夫决策问题的优势函数作为奖励函数的\textbf{重塑马尔科夫决策问题}
+\begin{equation}
+    \{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, A(s, a;\theta_\pi), \lambda\}.
+\end{equation}
+
+如果$\lambda = \gamma$时，由\eqref{equ:rs-policy-function}式可知，两个问题的最优策略相同。而当$\lambda = 0$时，重塑马尔科夫决策问题的值函数$Q_{rs}(s, a; \theta_\pi)$就等于原马尔科夫决策问题的优势函数$A(s, a; \theta_\pi)$。那么两个马尔科夫决策问题对应的策略梯度唯一的不同之处就是分布$\mathbf{p}_{\gamma}(s;\theta_\pi)$和$\mathbf{p}_{\lambda}(s; \theta_\pi)$，如果在求解重塑马尔科夫决策问题的策略梯度时是从$\mathbf{p}_{\gamma}$中采样，那么其实得到的就是原马尔科夫决策问题的策略梯度，即等价于求解如下马尔可夫决策问题
+\begin{equation}
+    \{\mathcal{S}, \mathcal{A}, \mathbf{p}_\gamma, \mathbf{P}, A(s, a;\theta_\pi), 0\}.
+\end{equation}
+
+在实践中研究者发现，$\lambda = \gamma$会导致估计出来的策略梯度的方差过大，而$\lambda=0$过于``短视''，所以人们通常取$0 < \lambda < \gamma$。
+
+\begin{remark}
+泛化优势函数是一个启发式的估计算法，它的好处是降低了梯度策略估计值的方差（variance），但它同时也引进了偏差（bias），而超参数$\lambda$则是起到了平衡方差和偏差的作用。它在实践中取到了非常好的效果，通常被默认使用在策略梯度优化的算法中。
+\end{remark}
+
+\subsection{解决采样问题}
+
+本小节将解决 \ref{ss:policy-gradient} 小节中提出的第二个问题：如何从分布$\mathbf{p}_{\gamma}(s; \pi)$中采集状态样本$s$?解决这个问题的同时，我们也能解决另一个问题：如何采集一条无限长度的轨迹样本？在本节中，本文提出了一种新的采样方法——\textbf{随机截断法}（Stochastic Truncate）。
+
+首先介绍一下传统的解决方法——\textbf{固定截断法}。通常，我们会设定一个最大长度$L$（通常会取$L = 1000$）。当轨迹的长度达到最大长度时，我们就人为截断它为：
+\begin{equation}
+    \tau = (s_0, a_0, r_0, s_1, a_1, r_1, \ldots, s_L, a_L, r_L).
+\end{equation}
+接着我们人为地将轨迹截断为状态转移片断样本集$\{(s, a, r, s')\}$用于估计策略梯度。这种方式获得的状态样本是近似是从分布
+\begin{equation}
+    \mathbf{p}_{avg}(s;\theta_\pi) = \frac{1}{L} \sum^{L-1}_{t=0} \mathbf{p}_t(s;\theta_\pi)  
+\end{equation}
+中采样获得。因为马尔科夫链会将分布逐渐收敛到稳态分布$\mathbf{d}$，所以有：
+\begin{equation}
+    \lim_{L \rightarrow \infty} \frac{1}{L} \sum^{L-1}_{t=0} \mathbf{p}_t = \mathbf{d}.
+\end{equation}
+也就是说，固定截断法可以近似地看做从马尔科夫链的稳态分布中采集状态样本。
+
+接下来本文将提出随机截断法，也进一步对固定截断法做更进一步的理解。
+首先对于一个马尔科夫决策问题$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，本文构造一个和它对应的马尔科夫决策问题：
+\begin{equation}
+    \{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, (1 - \gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma\mathbf{P}, R, \gamma\}.
+\end{equation}
+其中，$\mathbf{1}$是每个维度都是1的向量，$(1 - \gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma\mathbf{P}$指的是在$(s, a)$状态转移到下一状态$s'$的概率为$(1 - \gamma)\mathbf{p}_0(s') + \gamma \mathbf{P}(s' \vert s, a)$。
+
+接着，我们介绍原马尔科夫决策过程和新的马尔科夫决策过程的关系。在原马尔科夫决策过程未知，只能对它进行采样的设定下，我们很容易转而对新的马尔科夫决策过程进行采样。从新的马尔科夫决策过程的状态转移概率可知：对原马尔科夫决策过程进行一步状态转移的采样后，我们以$(1 - \gamma)$的可能性截断当前轨迹，重启一条新的轨迹采样；并且以$\gamma$的可能性对当前轨迹继续采样。根据这种随机截断采样的方式，我们就能从原马尔科夫决策过程转而向新的马尔科夫决策过程采样，所以我们称新的马尔科夫决策过程为\textbf{随机截断马尔科夫决策过程}（Stochastic Truncate Markov Decision Processes）。
+
+其次，我们介绍随机截断马尔科夫决策过程和目标$\mathbf{p}_{\gamma}(s; \pi)$分布的关系。本小节我们只关心状态，所以我们来研究只和状态有关的马尔科夫链以及它对应的随机截断马尔科夫链：$\{\mathcal{S}, \mathbf{p}_0, \mathbf{P}_{\pi}\}$ 和 $\{\mathcal{S}, \mathbf{p}_0, (1-\gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma\mathbf{P}_{\pi}\}$。其中
+\begin{equation}
+    \mathbf{P}_{\pi}(s' \vert s) = \sum_a \mathbf{P}(s' \vert s, a) \pi(a \vert s)，
+\end{equation}
+以及
+\begin{equation}
+    [(1-\gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma\mathbf{P}_{\pi}](s' \vert s) = (1 - \gamma)\mathbf{p}_0(s') + \gamma \sum_a \mathbf{P}(s' \vert s, a) \pi(a \vert s).
+\end{equation}
+
+下面这个定理揭示了两个马尔科夫链的关系。
+\begin{theorem}\label{thm:stochastic-cut-theorem}
+    对于任意的马尔科夫链$\{\mathcal{X}, \mathbf{p}_0, \mathbf{P}\}$，它对应的随机截断马尔科夫链$\{\mathcal{X}, \mathbf{p}_0, (1 - \gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma \mathbf{P}\}$的稳态分布为：
+    \begin{equation}
+        \mathbf{d}_{st}(s) = \bigg[(1 - \gamma) \sum^{\infty}_{t=0} \gamma^t \mathbf{p}^T_0 \mathbf{P}^t\bigg](s) = \mathbf{p}_{\gamma}(s).
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    由稳态分布的定义可得：
+    \begin{align*}
+        \mathbf{d}^T_{st} =& \mathbf{d}^T_{st} [(1 - \gamma)\mathbf{1}\mathbf{p}^T_0 + \gamma \mathbf{P}]\\
+        =& (1 - \gamma) \mathbf{p}^T_0 + \gamma \mathbf{d}^T_{st} \mathbf{P}\\
+        \mathbf{d}^T_{st}(\mathbf{I} - \gamma \mathbf{P})=& (1 - \gamma) \mathbf{p}^T_0\\
+        \mathbf{d}^T_{st} =& (1 - \gamma)\mathbf{p}^T_0 (\mathbf{I} - \gamma \mathbf{P})^{-1}\\
+        =& (1 - \gamma)\mathbf{p}^T_0 \sum^{\infty}_{t=0}(\gamma \mathbf{P})^t\\
+        =& (1 - \gamma)\sum^{\infty}_{t=0}\gamma^t \mathbf{p}^T_0 \mathbf{P}^t.
+    \end{align*}
+\end{proof}
+
+根据定理\ref{thm:stochastic-cut-theorem}可知，我们只需要从随机截断马尔科夫决策过程采集一条轨迹，这条轨迹的状态对应的分布会逐渐收敛到随机截断马尔科夫决策过程的稳态分布，也就是我们成功从目标分布$\mathbf{p}_{\gamma}(s; \pi)$中采集到了状态样本。
+
+我们现在再来回顾固定截断法。在每一步的状态转移时，随机截断法会以$(1 - \gamma)$的可能性截断轨迹，那么轨迹的长度$L$服从几何分布$p(L) = \gamma^{L-1} (1 - \gamma)$，轨迹的长度$L$的期望为$1/(1 - \gamma)$。反过来理解，当我们取值$\gamma = 1 - 1/L$时，使用随机截断法采集的轨迹的期望长度为$L$。
+
+\begin{remark}
+    在实际实验中，使用随机截断法进行采样过程中，当环境处于$(s_L, a_L)$需要被截断时，算法可以在延续采样$K$个长度的样本，用于降低$Q(s_L, a_L;\theta_\pi)$或者$A(s_L, a_L;\theta_\pi)$的估计误差。即样本轨迹为：
+    \begin{equation}
+        (s_0, a_0, r_0, s_1, a_1, r_1, \ldots, s_L, a_L, r_L, \ldots, s_{L+K}, a_{L+K}, r_{L+K}).
+    \end{equation}
+    最后$K$个样本用于估计$Q(s_L, a_L;\theta_\pi)$或者$A(s_L, a_L;\theta_\pi)$。
+\end{remark}
+
+\subsection{本章小结}
+本章介绍了强化学习中一个非常重要的定理——随机策略梯度定理。它将原本的序列决策优化问题转化为了一个优化问题，并且提供了使用基于梯度的优化算法来求解强化学习最优策略的算法的基础。本章也介绍了使用优势函数版本的随机策略梯度定理，它相比于原本的随机策略梯度而言，在理论上具有更小的方差。接着本章解决了两个估计策略梯度的难点：值函数的估计问题和状态采样问题。关于值函数的估计问题，本章介绍了在实践中非常有效地降低方差的泛化优势函数。关于状态采样问题，本章首次提出了随机截断法，并且从理论上证明了随机截断法比传统的固定截断法具有更小的偏差。

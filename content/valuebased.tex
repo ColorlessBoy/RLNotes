@@ -1,0 +1,486 @@
+\section{基于最优贝尔曼等式的算法}
+
+本章内容继续探讨马尔科夫决策过程，主要侧重于介绍一类求解最优策略的具体算法——基于最优贝尔曼等式的算法。基于最优贝尔曼等式的算法主体上分为两大类：一类是基于模型的算法，另一类是无模型的算法。而无模型的算法通常也被称为强化学习算法。基于模型的算法又分为：值迭代算法（Value Iteration）、策略迭代算法（Policy Iteration）以及改进策略迭代算法（Modifited Policy Iteration）\cite{puterman2014markov}，它们都使用了最优贝尔曼等式来提升策略的性能。而无模型的算法本章节介绍的则是重要的Q-Learning算法\cite{watkins1989learning,mnih2013playing,mnih2015human}。本论文通过对这些算法的介绍，来完善整个马尔科夫决策过程理论，为本论文的算法打下坚实的基石。
+
+\subsection{值迭代算法}
+
+在马尔科夫决策过程领域，\textbf{值迭代算法}（Policy Iteration）是使用最广，研究最为充分的算法。它有着非常多的别名：逐次逼近法，超松弛法，逆向归纳法，以及动态规划法\cite{feinberg2012handbook}。它应用这么广，可能是因为它的概念非常简单，代码也非常容易实现。这个算法背后蕴含的思想同时也应用在很多其他的数学领域\cite{boyd2004convex}。我们就从介绍值迭代法的最基本形式开始，它虽然并不是最高效的形式，但是十分简单并且容易分析。
+
+值函数算法一个求解最优值函数$Q^*$的数值估计方法，所以它求解到的是$Q^*$某个精度的近似解。这里有一个假设：当值函数$Q$非常接近的时候，对应的策略函数$\pi_Q = \arg\max_{\pi} T_{\pi}Q$可能是完全相同的。也就是说，我们只要求到最优值函数$Q^*$某个精度范围内的近似解，我们可能就已经能获得最优的策略函数了，所以这个值函数算法是能够完全精确地求解一个马尔科夫决策问题的。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{要求精度$\epsilon$,以及一个马尔科夫决策过程$\{\mathcal{S},\mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$}
+    \KwOut{最优策略值函数$Q^*$，以及最优策略$\pi^*$}
+    随机初始化一个值函数$Q$, 一个策略函数$\pi$\;
+    \While(){True}{
+        $Q' = Q$\;
+        $\pi = \arg\max_{\pi} R + \gamma\mathbf{P}_{\pi} Q$\;
+        $Q = R + \gamma \mathbf{P}_{\pi} Q'$\;
+        \If(){$\Vert Q' - Q \Vert \le \epsilon(1 - \gamma)/(2\gamma)$}{break\;}
+    }
+    \KwRet{$Q$，$\pi$}
+    \caption{值迭代算法}
+\end{algorithm}
+
+从上面值迭代法来看，值迭代法实际上就是对一个初始化的值函数$Q$不断进行最优贝尔曼操作。所以，值迭代法其实是构造了一个收敛到最优值函数的柯西序列$\{Q_n\}$。接下来的引理就揭示了这个柯西序列收敛到最优值函数的速度。
+
+\begin{theorem}[值迭代法的收敛率]
+    使用值迭代法来求解任意一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优策略时构造的值函数序列$\{Q_n\}$满足：
+    \begin{subequations}
+        \begin{equation}
+            \Vert Q_{n+1} - Q^* \Vert \le \gamma
+            \Vert Q_{n} - Q^* \Vert,
+        \end{equation}
+        \begin{equation}
+            \Vert Q_{n+1} - Q^* \Vert \le \frac{\gamma}{1 - \gamma} 
+            \Vert Q_{n+1} - Q_n \Vert,
+        \end{equation}
+        \begin{equation}
+            \Vert Q_{n+1} - Q^* \Vert \le \frac{\gamma^n}{1-\gamma}
+            \Vert Q_{1} - Q_0 \Vert.
+        \end{equation}
+    \end{subequations}
+\end{theorem}
+\begin{proof}
+    关于于第一个不等式的证明：
+    \begin{equation*}
+        \Vert Q_{n+1} - Q^* \Vert
+        = \Vert TQ_{n} - TQ^* \Vert 
+        \le \gamma \Vert Q_{n} - Q^* \Vert.
+    \end{equation*}
+
+    关于第二个不等式的证明：
+    \begin{align*}
+        &\Vert Q_{n+1} - Q^* \Vert \\
+        =& \Vert Q_{n+1} - TQ_{n+1} + TQ_{n+1} - Q^* \Vert \\
+        \le& \Vert Q_{n+1} - TQ_{n+1}\Vert + \Vert TQ_{n+1} - Q^* \Vert \\
+        =& \Vert T Q_{n} - TQ_{n+1}\Vert + \Vert TQ_{n+1} - TQ^* \Vert \\
+        \le& \gamma \Vert Q_{n} - Q_{n+1}\Vert 
+            + \gamma\Vert Q_{n+1} - Q^* \Vert, \\
+    \end{align*}
+    将不等式左右两边整理可得：
+    \begin{align*}
+        (1 - \gamma)\Vert Q_{n+1} - Q^* \Vert \le
+        \gamma \Vert Q_n - Q_{n+1} \Vert.
+    \end{align*}
+    
+    关于第三个不等式的证明：
+    \begin{align*}
+        &\Vert Q_{n+1} - Q^* \Vert \\
+        \le& \frac{\gamma}{1-\gamma} \Vert Q_n - Q_{n+1} \Vert\\
+        =& \frac{\gamma}{1-\gamma} \Vert TQ_{n-1} - TQ_{n} \Vert\\
+        \le& \frac{\gamma^2}{1-\gamma} \Vert Q_{n-1} - Q_{n} \Vert\\
+        & \vdots\\
+        \le& \frac{\gamma^n}{1-\gamma} \Vert Q_0 - Q_1 \Vert.
+    \end{align*}
+\end{proof}
+
+从上面的引理可知，值迭代法的终止条件$\Vert Q_{n+1} - Q_{n} \Vert \le \epsilon(1-\gamma) /(2\gamma)$可以保证最终求得的值函数的精度满足要求$\epsilon$。
+
+\subsection{策略迭代算法}
+
+\textbf{策略迭代算法}（Policy Iteration）是在策略空间上进行优化的算法。它的收敛率远大于值迭代算法，但是单步的计算复杂度也远大与值迭代算法，它提供了一个很好的提升值迭代算法收敛率的方向。下一小节将介绍一个把两者结合的平衡了计算复杂度与收敛速度的新的算法——改进策略迭代算法。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{一个马尔科夫决策过程$\{\mathcal{S},\mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$}
+    \KwOut{最优策略值函数$Q^*$，以及最优策略$\pi^*$}
+    随机初始化一个值函数$Q$, 一个策略函数$\pi$\;
+    \While(){True}{
+        $\pi' = \pi$\;
+        $Q = (\mathbf{I} - \gamma \mathbf{P}_{\pi})^{-1}R$\;
+        $\pi = \arg\max_{\pi} R + \gamma \mathbf{P}_{\pi} Q$\;
+        \If(){$\pi == \pi'$}{break\;}
+    }
+    \KwRet{$Q$，$\pi$}
+    \caption{策略迭代算法}
+\end{algorithm}
+
+从策略迭代算法的流程可以看到，它并不需要接收一个精度。一旦策略满足最优贝尔曼等式时，策略迭代算法将返回这个策略。因此策略迭代算法返回的策略值一定是输入的马尔科夫决策过程的最优策略。其中，最令人疑惑的问题是：这个算法能够终止吗？我们将在接下来进行严格的数学论述。
+
+我们先来详细解释一下策略迭代算法的具体流程。首先，策略迭代算法生成了两个序列$\{\pi_n\}$和$\{Q_n\}$。我们添加上序列下标，可以得到策略迭代算法的两个关键步骤：$Q_n = (\mathbf{I} - \gamma \mathbf{P}_{\pi_n})^{-1} R$，以及 $\pi_{n+1} = \arg\max_\pi R + \gamma \mathbf{P}_\pi Q_n$。其中第一个操作就是对策略进行估计： 根据贝尔曼等式$Q_\pi = R + \gamma \mathbf{P}_{\pi} Q_\pi$直接可得$Q_\pi = (\mathbf{I} - \gamma \mathbf{P}_\pi)^{-1} R$。也就是说在策略迭代算法中$Q_n = Q_{\pi_n}$。而第二个操作就是对$Q_n$进行一步最优贝尔曼操作，使策略$\pi$往最优策略的方向移动一步。
+
+对于策略迭代算法的分析比值迭代算法要复杂一些，本文会介绍两个关于策略迭代算法的性质，来帮助对策略迭代算法进行分析。
+
+定义一个与最优贝尔曼操作有关的新算子$U$满足$UQ = TQ - Q = \max_\pi R + \gamma \mathbf{P}_{\pi} Q - Q$。那么，
+\begin{lemma}\label{lem:subgradient-u}
+    任意的$Q_1$和$Q_2$以及$\pi_{Q_1}$和$\pi_{Q_2}$，如果满足
+    $\pi_{Q_i} = \arg\max_{\pi} R + \gamma\mathbf{P}_{\pi} Q_i$。我们有
+    \begin{equation}
+        UQ_1 \succeq UQ_2 + (\gamma \mathbf{P}_{\pi_{Q_2}} - \mathbf{I})(Q_1 - Q_2).
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    已知
+    \begin{align*}
+        UQ_1 =& \max_{\pi} R + \gamma \mathbf{P}_{\pi_{Q_1}} Q_1 - Q_1\\
+        =& R + \gamma \mathbf{P}_{\pi_{Q_1}} Q_1 - Q_1\\
+        \succeq& R + \gamma \mathbf{P}_{\pi_{Q_2}} Q_1 - Q_1,
+    \end{align*}
+    以及
+    \begin{equation*}
+        UQ_2 = R + \gamma \mathbf{P}_{\pi_{Q_2}} Q_2 - Q_2,
+    \end{equation*}
+    我们将两式相减可得引理结论。
+\end{proof}
+根据上面这个引理，我们可以知道算子$U$的``次梯度''为$\gamma \mathbf{P}_{\pi_Q} - \mathbf{I}$，其中$\pi_Q = \arg\max_\pi R + \gamma\mathbf{P}_{\pi} Q$ 。
+
+\begin{lemma}
+    关于一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，策略迭代算法可以产生两个序列：$\{\pi_n\}$，以及 $\{Q_n\}$。设最优值函数为$Q^*$，那么$\{Q_n\}$是绝对单调非减的以及极限为$Q^*$，即$Q_0 \preceq Q_1 \preceq \ldots Q_n \preceq \ldots \preceq Q^*$，并且$\lim_{n\rightarrow \infty} Q_n = Q^*$。
+\end{lemma}
+\begin{proof}
+    定义序列$\{a_n\}$满足：$a_0 = Q_0$，并且$a_{n+1} = Ta_n = \max_{\pi} R + \gamma \mathbf{P}_{\pi}a_n$，也就是从$a_0$进行值迭代算法而获得的序列。然后我们用数学归纳法来证明$a_n \preceq Q_n \preceq Q^*$。
+
+    当$n = 0$时，满足条件$a_0 = Q_0 \preceq Q^*$。当$n \ge 0$时，假设满足$a_{n} \preceq Q_{n} \preceq Q^*$。接着有如下关系：
+    \begin{align*}
+        Q_{n+1} =& (\mathbf{I} - \lambda \mathbf{P}_{\pi_{n+1}})^{-1}R\\
+        =& Q_n + (\mathbf{I} - \lambda \mathbf{P}_{\pi_{n+1}})^{-1}
+        (R + \lambda \mathbf{P}_{\pi_{n+1}}Q_n - Q_n)\\
+        \succeq& Q_n + (R + \lambda \mathbf{P}_{\pi_{n+1}}Q_n - Q_n)\\
+        =& R + \lambda \mathbf{P}_{\pi_{n+1}}Q_n = TQ_n 
+        \succeq Ta_{n} = a_{n+1}.
+    \end{align*}
+    这里用到了两个结论。一个是当$Q \succeq 0$时， $(\mathbf{I} - \lambda\mathbf{P}_{\pi})^{-1}Q = Q + (\lambda\mathbf{P}_{\pi})Q + \ldots + (\lambda \mathbf{P}_{\pi})^n Q + \ldots \succeq Q$。另一个是当$Q_n \succeq a_n$时，设$\pi_{Q_n} = \arg\max_\pi R + \gamma \mathbf{P}_{\pi} Q_n$ 以及$\pi_{a_n} = \arg\max_\pi R + \gamma\mathbf{P}_{\pi} a_n$，
+    那么
+    \begin{equation*}
+        TQ_n \succeq R + \gamma\mathbf{P}_{\pi_{a_n}} Q_n \succeq Ta_n.
+    \end{equation*}
+
+
+    因为$\{a_n\}$的极限为$Q^*$，所以$\{Q_n\}$的极限大于$Q^*$。又因为$Q_n \preceq Q^*$，所以$\{Q_n\}$的极限为$Q^*$。
+
+    接着我们证明$\{Q_n\}$的单调性。首先，因为$Q_n = Q_{\pi_n}$，我们有
+    \begin{equation*}
+        Q_n = R + \gamma \mathbf{P}_{\pi_n} Q_n
+        \preceq
+        R + \gamma \mathbf{P}_{\pi_{n+1}} Q_n,
+    \end{equation*}
+    所以
+    \begin{equation*}
+        Q_n \preceq
+        (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}R 
+        = Q_{n+1}.
+    \end{equation*}
+\end{proof}
+
+\begin{theorem}[策略迭代算法的收敛率]
+    使用策略迭代法来求解任意一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优策略时构造的值函数序列$\{\pi_n\}$和$\{Q_n\}$满足：
+    \begin{equation}
+        \Vert Q_{n+1} - Q^* \Vert
+        \le \frac{\gamma}{1 - \gamma} 
+        \Vert (\mathbf{P}_{\pi_{n+1}} - \mathbf{P}_{\pi^*})
+        (Q_{n} - Q^*)\Vert.
+    \end{equation}
+    而且，如果存在$K$使得所使用的策略$\pi$满足$\Vert \mathbf{P}_{\pi} - \mathbf{P}_{\pi^*}\Vert \le K \Vert Q_{\pi} - Q^* \Vert$，那么
+    \begin{equation}
+        \Vert Q_{n+1} - Q^* \Vert
+        \le \frac{\gamma}{1 - \gamma} 
+        \Vert Q_{n} - Q^* \Vert^2.
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    根据引理\ref{lem:subgradient-u}可得
+    \begin{align*}
+    UQ_{n} 
+    \succeq& UQ^* + (\gamma\mathbf{P}_{\pi^*} - \mathbf{I})(Q_{n} - Q^*)\\
+    =& TQ^* - Q^* + (\gamma\mathbf{P}_{\pi^*} - \mathbf{I})(Q_{n} - Q^*)\\
+    =& (\gamma\mathbf{P}_{\pi^*} - \mathbf{I})(Q_{n} - Q^*)\\
+    =& (\mathbf{I} - \gamma\mathbf{P}_{\pi^*})(Q^* - Q_{n}).
+    \end{align*}
+    接着有
+    \begin{align*}
+        &Q^* - Q_{n+1} \\
+        =& Q^* - (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}R\\
+        =& Q^* - Q_n + Q_n - (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}R\\
+        =& Q^* - Q_n + (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            [(\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}}) Q_n - R]\\
+        =& Q^* - Q_n + (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            [Q_n - TQ_n]\\
+        =& Q^* - Q_n + (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            (-UQ_n)\\
+        \preceq& Q^* - Q_n - (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            (\mathbf{I} - \gamma \mathbf{P}_{\pi^*})(Q^* - Q_n)\\
+        =& (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            (\gamma\mathbf{P}_{\pi^*} - \gamma\mathbf{P}_{\pi_{n+1}})
+            (Q^* - Q_n)
+    \end{align*}
+    有因为$Q_{n+1} \preceq Q^*$，所以我们可得
+    \begin{align*}
+        \Vert Q^* - Q_{n+1}\Vert
+        \le& 
+        \Vert (\mathbf{I} - \gamma \mathbf{P}_{\pi_{n+1}})^{-1}
+            (\gamma\mathbf{P}_{\pi^*} - \gamma\mathbf{P}_{\pi_{n+1}})
+            (Q^* - Q_n) \Vert\\
+        \le& \frac{\gamma}{1-\gamma}
+            \Vert 
+            (\mathbf{P}_{\pi^*} - \mathbf{P}_{\pi_{n+1}})
+            (Q^* - Q_n)
+            \Vert.
+    \end{align*}
+\end{proof}
+
+从上面的引理可得，如果满足假设：存在$K$使得使用到的策略$\pi$满足$\Vert \mathbf{P}_{\pi} - \mathbf{P}_{\pi^*}\Vert \le K \Vert Q_{\pi} - Q^* \Vert$，那么策略迭代算法的收敛率可以提升到二次收敛速度。在通常的实验中，却是能够发现策略迭代算法要快于值迭代算法。
+
+\subsection{改进策略迭代算法}
+
+本小节开始介绍一个结合了值迭代算法和策略迭代算法共同特点的算法——\textbf{改进策略迭代算法}（Modified Policy Iteration）。 
+
+从前文可知，值迭代算法计算简单但是收敛速度慢，而策略迭代算法计算复杂但是收敛速度快。在策略迭代算法中有一步$Q_n = (\mathbf{I} - \gamma\mathbf{P}_{\pi_n})^{-1} R$需要求解矩阵的逆，通常的计算复杂度为$O(N^3)$。
+
+策略迭代算法还是有非常大的改进空间的。在策略迭代算法中$Q_n = (\mathbf{I} - \gamma \mathbf{P}_{\pi_n})^{-1} R$实际上是用来求解$\pi_{n+1} = \max_{\pi} R + \gamma \mathbf{P}_{\pi} Q_n$的，并且算法的最终目的也是求解一个最优的策略$\pi^*$。而我们往往会发现，当$Q$值足够接近的时候，$\pi_Q = \max_{\pi} R + \gamma \mathbf{P}_{\pi}Q$会是相同的。也就是说，我们其实不需要完全精确地求解$Q_n$，而只需要求解一个近似的结果。我们注意到
+\begin{equation}
+    Q_n = (\mathbf{I} - \gamma \mathbf{P}_{\pi_n})^{-1} R
+    = \sum^\infty_{m=0} (\gamma \mathbf{P}_{\pi_n})^m R,
+\end{equation}
+所以很直接地，我们就能够想到一个$Q_t$的近似估计:
+\begin{equation}
+    \tilde Q_n = \sum^{M}_{m=0}(\gamma\mathbf{P}_{\pi_n})^m R 
+    + (\gamma\mathbf{P}_{\pi_n})^{M+1} \tilde Q_{n-1},
+\end{equation}
+其中$M \ge 0$。其实我们也就得到了改进策略迭代算法。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{要求精度$\epsilon$,以及一个马尔科夫决策过程$\{\mathcal{S},\mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$}
+    \KwOut{最优策略值函数$Q^*$，以及最优策略$\pi^*$}
+    随机初始化一个值函数$Q$, 一个策略函数$\pi$\;
+    \While(){True}{
+        $Q' = Q$\;
+        $Q = \max_{\pi} R + \gamma \mathbf{P}_{\pi} Q$\;
+        \If(){$\Vert Q' - Q \Vert \le \epsilon(1 - \gamma)/(2\gamma)$}{break\;}
+        $\pi = \arg\max_{\pi} R + \gamma\mathbf{P}_{\pi} Q'$\;
+        $Q = \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi})^mR 
+        + (\gamma \mathbf{P}_{\pi})^{M+1} Q'$\;
+    }
+    \KwRet{$Q$，$\pi$}
+    \caption{改进策略迭代算法}
+\end{algorithm}
+
+首先，我们仍然需要一个引理来证明改进策略迭代法的一个性质，它有助于改进策略迭代法收敛率的证明。
+\begin{lemma}
+    输入一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$我们使用改进策略迭代法求解它的最优策略时,会构造的一个序列$\{Q_n\}$。当$Q_0 \preceq Q^*$时，$\{Q_n\}$是严格单调非减的，并且存在极限等于$Q^*$。
+\end{lemma}
+\begin{proof}
+    定义序列$\{a_n\}$满足$a_0 = Q_0$并且$a_{n+1} = \max_{\pi} R + \gamma \mathbf{P}_{\pi}a_n$。再定义序列$\{b_n\}$满足$b_0 = Q_0$并且$b_{n+1} = \max_\pi \sum^M_{m=0}(\gamma\mathbf{P}_\pi)^mR + (\gamma \mathbf{P}_{\pi})^{M+1}b_n$。
+
+    首先我们可知$\{a_n\}$和$\{b_n\}$都是由值迭代法产生的序列，所以它们的极限都为$Q^*$。接下来我们用数学归纳法来证明$a_n \preceq Q_n \preceq b_n$。当$n=0$时满足$a_0 = Q_0 = b_0$。假设$a_n \preceq Q_n \preceq b_n$，那么首先比较好证明$b_{n+1} \succeq Q_{n+1}$：
+    \begin{align*}
+        b_{n+1} =& \max_\pi \sum^M_{m=0}(\gamma\mathbf{P}_\pi)^mR + (\gamma 
+        \mathbf{P}_{\pi})^{M+1}b_n\\
+        \succeq& \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^mR + (\gamma 
+        \mathbf{P}_{\pi_{n+1}})^{M+1}b_n\\
+        \succeq& \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^mR + (\gamma 
+        \mathbf{P}_{\pi_{n+1}})^{M+1}Q_n = Q_{n+1}.
+    \end{align*}
+    另外
+    \begin{align*}
+        &Q_{n+1} - a_{n+1}\\
+        =& \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^m R
+        + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1} Q_n - Ta_n\\
+        \succeq& \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^m R
+        + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1} Q_n - TQ_n\\
+        =& \sum^M_{m=1}(\gamma\mathbf{P}_{\pi_{n+1}})^m R
+        + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1} Q_n 
+        - \gamma \mathbf{P}_{\pi_{n+1}} Q_n\\
+        =& \sum^{M}_{m=1}(\gamma\mathbf{P}_{\pi_{n+1}})^m
+        [R + \gamma\mathbf{P}_{\pi_{n+1}}Q_n - Q_n] \succeq 0.
+    \end{align*}
+    综上，我们证明了$a_{n+1} \succeq Q_{n+1} \succeq b_{n+1}$。所以$\{Q_n\}$收敛到$Q^*$。
+
+    接着我们证明当$Q_0\succeq Q^*$时，$\{Q_n\}$严格单调非减。
+    \begin{align*}
+        &Q_{n+1} - Q_{n}\\
+        =& \sum^{M}_{m=0} (\gamma \mathbf{P}_{\pi_{n+1}})^m R 
+        + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}Q_{n} - Q_{n}\\
+        =& \sum^{M}_{m=0} (\gamma \mathbf{P}_{\pi_{n+1}})^m
+        (R + \gamma \mathbf{P}_{\pi_{n+1}} Q_n - Q_n) \succeq 0.
+    \end{align*}
+    所以我们可得：当$Q_0\preceq Q^*$时，$Q_0 \preceq Q_1 \preceq \ldots \preceq Q_n
+    \preceq \ldots \preceq Q^*$。
+\end{proof}
+
+\begin{theorem}[改进策略迭代法的收敛率]
+    使用改进策略迭代法来求解任意一个马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$的最优策略时构造的序列$\{Q_n\}$和$\{\pi_n\}$满足：如果$Q_0 \preceq Q^*$，那么
+    \begin{equation}
+        \Vert Q_{n+1} - Q^* \Vert
+        \le
+        \left[
+            \frac{\gamma(1 - \gamma^{M+1})}{1 - \gamma}
+            \Vert \mathbf{P}_{\pi_{n+1}} - \mathbf{P}_{\pi^*}\Vert
+            + \gamma^{M+1}
+        \right]
+        \Vert Q_n - Q^* \Vert.
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    \begin{align*}
+    Q^* - Q_{n+1}
+    =& Q^* - \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m R 
+    - (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}Q_{n}\\
+    =& Q^* - Q_n - \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m 
+    [R + \gamma \mathbf{P}_{\pi_{n+1}} Q_n - Q_n]\\
+    =& Q^* - Q_n - \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m (UQ_n)\\
+    \preceq& Q^* - Q_n - \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m 
+    (\mathbf{I} - \gamma \mathbf{P}_{\pi^*})(Q^* - Q_n)\\
+    =& \sum^M_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m(\mathbf{I} 
+    - \gamma \mathbf{P}_{\pi_{n+1}}) (Q^* - Q_n) \\ 
+    & + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}(Q^* - Q_n)\\
+    & - \sum^{M}_{m=0}(\gamma \mathbf{P}_{\pi_{n+1}})^m 
+    (\mathbf{I} - \gamma \mathbf{P}_{\pi^*})(Q^* - Q_n)\\
+    =& \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^m(\gamma \mathbf{P}_{\pi^*} 
+    - \gamma \mathbf{P}_{\pi_{n+1}})(Q^* - Q_n)\\
+    & + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}(Q^* - Q_n).
+    \end{align*}
+    又因为$Q^* \succeq Q_{n+1}$所以
+    \begin{align*}
+        &\Vert Q^* - Q_{n+1} \Vert\\
+        \le& \big\Vert
+        \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^m(\gamma \mathbf{P}_{\pi^*} 
+        - \gamma \mathbf{P}_{\pi_{n+1}})(Q^* - Q_n)\\
+        & + (\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}(Q^* - Q_n)
+        \big\Vert\\
+        \le& \big\Vert
+        \sum^M_{m=0}(\gamma\mathbf{P}_{\pi_{n+1}})^m(\gamma \mathbf{P}_{\pi^*} 
+        - \gamma \mathbf{P}_{\pi_{n+1}})(Q^* - Q_n) \big\Vert\\
+        & + \big\Vert(\gamma \mathbf{P}_{\pi_{n+1}})^{M+1}(Q^* - Q_n)
+        \big\Vert\\
+        =& 
+        \left[
+            \frac{\gamma(1 - \gamma^{M+1})}{1 - \gamma}
+            \Vert \mathbf{P}_{\pi_{n+1}} - \mathbf{P}_{\pi^*}\Vert
+            + \gamma^{M+1}
+        \right]
+        \Vert Q_n - Q^* \Vert.
+    \end{align*}
+\end{proof}
+
+修正策略迭代法是介于值策略迭代与策略迭代算法之间的一个算法，当$M=0$时，修正策略迭代算法就退化为值迭代算法，收敛率也退化为值迭代算法的收敛率；当$M\rightarrow\infty$时，修正策略迭代算法就变成了策略迭代算法，收敛率就变成了策略迭代算法的收敛率。它很好地平衡了计算复杂度与收敛速度。
+
+\subsection{Q-Learning算法}
+前文所介绍的算法（值迭代算法、策略迭代算法和修正策略迭代算法）都是基于模型的算法，它们要求输入一个完整的马尔科夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，其中状态转移矩阵$\mathbf{P}$最为关键，它既反映了马尔科夫决策过程的本质特征，又是上述基于模型算法更新公式的关键量。
+
+但是，在现实生活中，我们遇到的决策问题很少能够提供一个状态转移矩阵。在控制领域，通常有大量的研究关注于如何人为地进行状态转移矩阵的建模，这个过程需要相关人员对控制系统有深刻认识，也就是需要大量的物理与数学相关的知识。而在强化学习领域中，研究人员希望能够通过一个智能的算法，来自动化地完成从对环境的认识到学习出一个最有效的策略这整个过程。
+
+也就是说，我们希望算法只需要接收一个``黑箱''——满足马尔科夫决策过程模型的环境。我们可以观测这个环境当前状态$s$, 能够向环境执行一个动作$a$，然后环境能够返回一个奖励值$r$和下一个状态$s'$。因为如此，我们只能够对马尔科夫决策过程进行采样，获取若干条轨迹$\tau = (s_0, a_0, r_0,  s_1, a_1, r_1, \ldots, s_t, a_t, r_t, \ldots)$。强化学习希望能够从这些轨迹样本中学习出针对这个环境的最优策略$\pi^*$来最大化累计奖励值。
+
+那么，本节就介绍一个强化学习中非常重要的基于样本的随机优化算法——\textbf{Q-Learning}\cite{watkins1989learning}。它可以看成一个近似值迭代算法，在值空间直接优化求解最优值函数$Q^*$。因为大部分强化学习相关的资料在介绍Q-Learning算法时会直接跳到它的更新公式上，从而造成了理解上的困难以及隐藏了原始Q-Learning算法的问题。所以本文选择从更基本的优化的角度来介绍Q-Learning。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总步数$N$，一个满足马尔科夫决策过程的环境。}
+    \KwOut{最优策略值函数的估计值$Q_\theta$}随机初始化值函数$Q_{\theta_1}$和$Q_{\eta_1}$, 使$\eta_1 = \theta_1$\;
+    \For(){$n = [1 .. N]$}{
+        使用策略$\pi_{Q, \epsilon}$从环境中采集$k$个样本$\{(s, a, r, s')_i; i = [1..k]\}$，其中$\pi_{Q, \epsilon} = (1 - \epsilon) \pi_Q + \epsilon u$,并且$u$是关于动作的均匀分布\;
+        将这$k$个样本加入到记忆池$\mathcal{D}$\;
+        从$\mathcal{D}$中采集$m$个样本$\{(s, a, r, s')_i: i = [1 .. m]\}$\;
+        $\theta_{n+1} = \theta_n + \frac{\alpha}{m} \sum^m_{i=0}[r_i + 
+        \gamma \max_{a'_i} Q_{\eta_n}(s'_i, a'_i) - Q_{\theta_n}(s_i, a_i)]
+        \nabla_{\theta_n}Q_{\theta_n}(s_i, a_i) $\;
+        $\eta_{n+1} = \eta_n + \beta (\theta_n - \eta_n)$\;
+    }
+    \KwRet{$Q_{\theta_{N+1}}$}
+    \caption{Q-Learning算法}
+\end{algorithm}
+
+首先要说明一下值函数$Q$的表达方式。在前文中，我们默认直接使用符号$Q$来表示值函数。这种表达方式在状态集合$\mathcal{S}$和动作集合$\mathcal{A}$是有限集的时候比较方便，这时$Q$既可以看成一个定义在$\mathcal{S}\times\mathcal{A}$上的值函数也可以看成一个$\vert\mathcal{S}\times\mathcal{A}\vert$大小的向量。如果$Q$函数是一个$\vert\mathcal{S}\times\mathcal{A}\vert$维度的向量，那么这种表达方式下$Q$函数可以表示任何一个定义在$\mathcal{S}\times\mathcal{A}$上的函数，它的表达形式是最丰富的。我们也称这种形式为\textbf{表格}（tabular）。
+
+这里，本文使用一种更一般的表达形式——参数化的值函数。本文使用符号$\theta$来表示值函数的参数，它可以是一个线性函数的系数，也可以是一个神经网络的参数。同时，本文使用$Q_{\theta}$来表示值函数被$\theta$参数化。首先这种表达形式可以表达状态集合$\mathcal{S}$和动作集合$\mathcal{A}$很大或者是或者无限集的情况。其次，当$\theta$的维度等于$\vert \mathcal{S}\times\mathcal{A}\vert$时，一个线性函数就能够等价表达一个表格。所以这种表达方式更加广义。
+
+我们希望使用一个参数化的$Q_\theta$来逼近马尔科夫决策过程的最优值函数$Q^*$。如果状态集合和动作集合有限时，根据最优贝尔曼公式，我们可以构造一个损失函数来衡量$Q_\theta$与$Q^*$的接近程度：
+\begin{equation}
+    \mathcal{L}(\theta) = \frac{1}{2}\sum_{s, a} [ Q_\theta(s, a) 
+    - TQ_\theta(s, a) ]^2.
+\end{equation}
+带入最优贝尔曼操作公式可得
+\begin{equation}
+    \begin{aligned}
+    \mathcal{L}(\theta) = \frac{1}{2}\sum_{s, a} \bigg\{ Q_\theta(s, a)
+    - \max_{\pi} \bigg[&R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)\\
+    &\sum_{a'}\pi(a' \vert s') Q_\theta(s', a')\bigg]\bigg\}^2,
+    \end{aligned}
+\end{equation}
+将继续化简$\max$操作可得
+\begin{equation}\label{equ:original-q-loss}
+    \mathcal{L}(\theta) = \frac{1}{2}\sum_{s, a} \bigg\{ Q_\theta(s, a)
+    - \bigg[R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\theta(s', a')\bigg]\bigg\}^2.
+\end{equation}
+上式隐式构造了一个确定性策略$\pi_\theta(s) \in \arg\max_a Q_\theta(s, a)$。由贝尔曼等式可得：当$\mathcal{L}(\theta) = 0$时，$Q_\theta = Q^*$。损失函数$\mathcal{L}_\theta$虽然能够保证全局最优解对应马尔科夫决策过程的最优值函数。同时也能保证， $\mathcal{L}(\theta)$越小，$Q_\theta$越接近$Q^*$，$\pi_\theta$越接近$\pi^*$。
+
+在本小节的设定下，我们只能从环境中采集轨迹样本
+\begin{equation}
+    \{\tau_i\}^m_{i=1} = \{(s^{(i)}_0, a^{(i)}_0, r^{(i)}_0, s^{(i)}_1, a^{(i)}_1, r^{(i)}_1, \ldots, s^{(i)}_t, a^{(i)}_t, r^{(i)}_t, \ldots)^{m}_{i=1}\}.
+\end{equation}
+我们将轨迹样本$\{\tau_i\}$拆分成一段段的状态转移
+\begin{equation}
+    \{(s_i, a_i, r_i, s'_i)\}^{m'}_{i=1}.
+\end{equation}
+这时，我们就能用这些状态转移样本来近似地估计\eqref{equ:original-q-loss}的梯度：
+\begin{equation}\label{equ:original-q-learning-deviation}
+    \frac{\mathrm{d} \mathcal{L}(\theta)}{\mathrm{d} \theta}
+    = \sum^{m'}_{i=1} \bigg\{ Q_\theta(s_i, a_i)
+    - \bigg[R(s_i, a_i) + \gamma \max_{a'} Q_\theta(s'_i, a')\bigg]\bigg\} \nabla_{\theta} Q(s_i, a_i).
+\end{equation}
+
+在只能获得轨迹样本的前提条件下，\eqref{equ:original-q-learning-deviation}式是损失函数\eqref{equ:original-q-loss}梯度的有偏估计值。我们可以换一个角度，不再用近似的角度，而是对损失函数做进一步的改变。损失函数$\mathcal{L}(\theta)$使用了二范数距离来衡量$Q_\theta$与$TQ_\theta$之间的差异。定义一个在$\mathcal{S}\times\mathcal{A}$上的均匀分布$u(s, a)$，那么可以将损失函数等价修改为
+
+\begin{equation}
+    \mathcal{L}(\theta) = \frac{1}{2}\mathbb{E}_{(s, a) \sim u} 
+    \bigg\{ Q_\theta(s, a)
+    - \bigg[R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\theta(s', a')\bigg]\bigg\}^2.
+\end{equation}
+
+那么，对于一个只能采样的马尔科夫决策过程，我们无法获得满足$u(s, a)$分布的样本，因此我们考虑使用一个泛化的任意分布$p(s, a)$来替换均匀分布$p(s, a)$。那么损失函数就变成了
+
+\begin{equation}
+    \mathcal{L}(\theta) = \frac{1}{2}\mathbb{E}_{(s, a) \sim p} 
+    \bigg\{ Q_\theta(s, a)
+    - \bigg[R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\theta(s', a')\bigg]\bigg\}^2.
+\end{equation}
+
+我们通常直接将轨迹$\tau = (s_0, a_0, r_0, s_1, a_1, r_1 \ldots, s_t, a_t, r_t, \ldots)$拆分成状态转移样本$((s_0, a_0, r_0, s_1), (s_1, a_1, r_1, s_2), \ldots, (s_t, a_t, r_t, s_{t+1}), \ldots)$用于损失函数的优化。也就是说，在强化学习中最常用的分布$p(s,a)$就是一个马尔科夫决策过程中$(s, a)$会访问到的概率。通常我们将状态转移样本称为\textbf{经验池}，通常它对应的分布$p(s, a)$和当前策略无关。用与当前策略无关的样本来优化求解的马尔科夫决策过程算法称为\textbf{异策略算法}，而Q-Learning算法就是一种\textbf{异策略算法}。
+
+如果使用梯度下降法来对上面的损失函数进行求导可得：
+\begin{equation}
+    \begin{aligned}
+    \nabla_{\theta}\mathcal{L}(\theta) = \mathbb{E}_{(s, a) \sim p} 
+    \bigg\{\bigg[& Q_\theta(s, a)
+    - \bigg[R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\theta(s', a')\bigg] \bigg]\\
+    & \cdot \bigg[\nabla_{\theta} Q_\theta(s, a) 
+    - \gamma \sum_{s'}\mathbf{P}(s' \vert s, a) \nabla_{\theta} 
+    \max_{a'} Q_\theta(s', a')\bigg]\bigg\}.
+    \end{aligned}
+\end{equation}
+
+这个导数面对着两个问题：一个问题是需要在固定$(s, a)$后对$s'$进行一次双采样，这是非常困难的；另一方面因为导数中的两项乘积都存在由$\mathbf{P}(s' \vert s, a)$引起的随机性，导致如果使用样本来估计这个梯度时会产生很大的方差。因此，我们需要进一步改进损失函数，来解决这两个问题。 
+
+在过去的Q-Learning中，研究人员提出直接忽略$\max$项的梯度，使用如下公式来近似
+$\mathcal{L}(\theta)$的梯度：
+\begin{equation}\label{equ:original-q-learning}
+    \mathbb{E}_{(s, a) \sim p} 
+    \bigg\{\bigg[ Q_\theta(s, a)
+    - \bigg[R(s, a) + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\theta(s', a')\bigg] \bigg]
+    \cdot \nabla_{\theta} Q_\theta(s, a)\bigg\}.
+\end{equation}
+这种近似的梯度仅在值函数使用表格形式或者线性函数形式时，被证明是收敛的。在\cite{mnih2013playing}中提出了一种更加有效的方法：使用第二个值函数来解耦和化简损失函数。原本的一个损失函数变成了两个损失函数：
+\begin{numcases}{}
+    \mathcal{L}(\eta) = \frac{1}{2} \Vert \eta - \theta \Vert^2_2\\
+    \begin{aligned}
+    \mathcal{L}(\theta) = \frac{1}{2}\mathbb{E}_{(s, a) \sim p} 
+    \bigg\{& Q_\theta(s, a) - \bigg[R(s, a) \\
+    & + \gamma \sum_{s'}\mathbf{P}(s' \vert s, a)
+    \max_{a'} Q_\eta(s', a')\bigg]\bigg\}^2.
+    \end{aligned}
+\end{numcases}
+
+显然，新的损失函数的最优解依旧满足最优贝尔曼公式，至此，我们获得了Q-Learning算法的核心流程\cite{mnih2013playing}。需要注意的是，我们可以直接求解出损失函数$\mathcal{L}(\eta)$ 的最优解$\eta = \theta$，同时算法也退化成使用式\eqref{equ:original-q-learning}的原始的Q-Learning算法。但是，在实际实践过程中，在使用深度神经网络等复杂的函数来表达值函数时，过快地求解$\mathcal{L}(\eta)$会造成算法的不稳定性。由于Q-Learning算法并没有完善的收敛性方面的理论研究，研究人员还无法确定$\mathcal{L}(\theta)$和$\mathcal{L}(\eta)$的最佳优化方案。
+
+
+\subsection{本章小结}
+
+本章介绍了两类基于最优贝尔曼等式的算法：一类是基于模型的算法，包含计算简单但是收敛较慢的值迭代算法、计算复杂但是收敛较快的策略迭代算法和兼具前两种算法优势的改进策略迭代算法；另一类是无模型的算法，即强化学习中非常重要的Q-Learning算法，它在实际实验中效果非常好，但是目前没有完善的理论来有效地分析它的本质机理。基于最优贝尔曼等式的算法在单次迭代时必须要求解一个子问题$\max_a Q(s, a)$，导致我们比较难直接使用它来求解连续动作空间的马尔科夫决策问题。接下来本文将介绍一些新的算法框架来更好地解决连续动作空间的马尔科夫决策问题。

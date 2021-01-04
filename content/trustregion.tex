@@ -1,0 +1,517 @@
+\section{置信域策略梯度优化算法}
+
+本章将继续上一章的内容，继续深入讨论策略梯度算法。当使用深度神经网络来参数化策略时，马尔科夫决策问题就变成一个典型的非凸优化问题。当使用基于梯度的优化算法来求解这个问题时，我们很难确定最合适的迭代步长。本章将进一步分析马尔科夫决策问题的更精细的结构，从而引出一个保证策略单调上升的定理——\textbf{置信域定理}\cite{kakade2002approximately}（Trust Region Theorem），它通过置信域的形式来指导算法使用合适的更新步长。接着本章节将介绍两个基于置信域定理的两个算法：\textbf{置信域策略优化算法}\cite{schulman2015trust}（Trust Region Policy Optimization，TRPO）和\textbf{近邻策略优化算法}\cite{schulman2017proximal}（Proximal Policy Optimization，PPO）。这两个算法在理论和实践中都取得了显著的成功。
+
+\subsection{置信域定理}
+
+本节将进一步研究马尔科夫决策问题，并且介绍一个重要的定理——\textbf{置信域定理}\cite{kakade2002approximately}（Trust Region Theorem）。在前一章节中介绍的策略梯度是从微分的角度来研究马尔科夫决策问题，而微分的角度通常因为极限的特性而隐藏了一些信息，本小节将从差分的角度来研究这个问题，进一步研究之前被隐藏了的信息。
+
+\subsubsection{策略的差分}
+首先，我们介绍两个策略的差分关系。
+\begin{lemma}
+    设一个马尔可夫决策过程$\mathcal{MDP} = \{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，它的策略评价函数为$\rho(\pi)$。那么，任意的两个策略$\pi_1$和$\pi_2$有如下关系：
+    \begin{equation}
+        \begin{aligned}
+            \rho(\pi_1) - \rho(\pi_2) =& (1 - \gamma)\mathbb{E}_{\tau \sim \mathcal{MDP}(\pi_1)} \bigg[\sum^{\infty}_{t=0} \gamma^t A(s_t, a_t; \pi_2)\bigg]\\
+            =& \sum_s \mathbf{p}_\gamma(s; \pi_1) \sum_a \pi_1(a \vert s) A(s, a; \pi_2).
+        \end{aligned}
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    首先是第一个等式的证明
+    \begin{align*}
+    & \mathbb{E}_{\tau\sim\mathcal{MDP}(\pi_1)}\left[\sum^{\infty}_{t=0} \gamma^t A(s_t, a_t; \pi_2)\right]\\
+    =& \mathbb{E}_{\tau\sim\mathcal{MDP}(\pi_1)}\left[\sum^{\infty}_{t=0} \gamma^t (Q(s_t, a_t; \pi_2) - V(s_t; \pi_2))\right]\\
+    =& \mathbb{E}_{\tau\sim\mathcal{MDP}(\pi_1)}\left[\sum^{\infty}_{t=0} \gamma^t (r(s_t, a_t)+\gamma V(s_{t+1}; \pi_2) - V(s_t; \pi_2))\right]\\
+    =& \mathbb{E}_{\tau\sim\mathcal{MDP}(\pi_1)}\left[\sum^{\infty}_{t=0} \gamma^t r(s_t, a_t) - V(s_0; \pi_2)\right]\\
+    =& \mathbb{E}_{\tau\sim\mathcal{MDP}(\pi_1)}\left[\sum^{\infty}_{t=0} \gamma^t r(s_t, a_t)\right] - \mathbb{E}_{s_0 \sim \mathbf{p}_0}\left[V(s_0; \pi_2)\right]\\
+    =& \frac{1}{1 - \gamma}[\rho(\pi_1) - \rho(\pi_2)].
+    \end{align*}
+
+    关于第二个等式，本质上只是求和顺序的更改。
+    \begin{align*}
+        &(1 - \gamma)\mathbb{E}_{\tau \sim \mathcal{MDP}(\pi_1)} \bigg[\sum^{\infty}_{t=0} \gamma^t A(s_t, a_t; \pi_2)\bigg]\\
+        =& (1 - \gamma) \sum^{\infty}_{t=0} \sum_s \mathbf{p}_t(s; \pi_1) \sum_{a} \pi_1(a \vert s) \gamma^t A(s, a; \pi_2) \\
+        =& \sum_s \sum^{\infty}_{t=0} (1 - \gamma) \gamma^t \mathbf{p}_t(s; \pi_1) \sum_{a} \pi_1(a \vert s) A(s, a; \pi_2) \\
+        =& \sum_s \mathbf{p}_\gamma(s; \pi_1) \sum_{a} \pi_1(a \vert s) A(s, a; \pi_2).
+    \end{align*}
+\end{proof}
+
+当使用策略梯度优化算法时，会产生一系列策略$\{\pi_n\}$。在理想情况下，我们希望在每一步求解优化问题：
+\begin{equation}\label{equ:true-objective}
+    \begin{aligned}
+    \pi_{n+1} =& {\arg\max}_{\pi} \rho(\pi) \\
+    =& {\arg\max}_{\pi} \rho(\pi_n) + 
+        \sum_{s} p_{\gamma}(s; \pi) \sum_a \pi(a \vert s) A (s, a; \pi_n).
+    \end{aligned}
+\end{equation}
+由于\eqref{equ:true-objective}式表示的原问题比较难解，普通的策略梯度优化算法将优化目标简化为
+\begin{equation}\label{equ:policy-gradient-ascend-objective}
+    \begin{aligned}
+    \pi_{n+1} =& {\arg\max}_{\pi} L(\pi, \pi_n) \\ 
+    =& {\arg\max}_{\pi} \rho(\pi_n) + \sum_{s} p_{\gamma}(s; \pi_n) \sum_a \pi(a \vert s) A (s, a; \pi_n),
+    \end{aligned}
+\end{equation}
+其中我们称$L(\pi, \pi_n)$为\textbf{相关策略评价函数}，它是一个关于策略$\pi$的线性函数。当使用参数$\theta_\pi$来参数化策略时，对应的更新公式为
+\begin{equation}\label{equ:policy-gradient-ascend-objective-param}
+    \theta_{\pi_{n+1}} = \theta_{\pi_n} + \alpha \sum_{s} p_{\gamma}(s; \theta_{\pi_n}) \sum_a \nabla_{\theta_{\pi_n}}\pi(a \vert s; \theta_{\pi_n}) \cdot A (s, a; \pi_n).
+\end{equation}
+\eqref{equ:policy-gradient-ascend-objective-param}式最大的问题是它并不能保证$\rho(\pi_n) \le \rho(\pi_{n+1})$。因为\eqref{equ:true-objective}式和\eqref{equ:policy-gradient-ascend-objective}式仅在$\pi_n$和$\pi_{n+1}$非常接近时两者才比较近似，策略梯度优化算法通常通过限制每一步更新参数的步长来保证$\pi_n$和$\pi_{n+1}$的距离不要太远。事实上，这个步长非常难以确定：当步长过小时，算法的学习收敛地非常慢；当步长过大时，又无法保证策略往好的方向更新。置信域定理的目标就是要构造一个显式的置信域，保证在这个置信域内$\rho(\pi)$和$L(\pi, \pi_n)$的差异不要过大。
+
+\subsubsection{全变分差异}
+在介绍置信域定理前，先补充一个概率论的先验知识——全变分差异\cite{billingsley2008probability}。
+\begin{definition}[全变分差异，Total Variation Divergence]
+    设$\mathcal{F}$是样本空间$\Omega$的幂集合的$\sigma$-代数（测度论中的一种可测集合）。两个定义在$\mathcal{F}$上的概率测度$P$和$Q$的全变分差异为
+    \begin{equation}
+        D_{TV}(P \Vert Q) = \sup_{A \in \mathcal{F}} \vert P(A) - Q(A) \vert.
+    \end{equation}
+\end{definition}
+全变分差异衡量的是两个分布在同一事件中的最大差异。
+\begin{lemma}
+    设$\mathcal{F}$是样本空间$\Omega$的幂集合的$\sigma$-代数（测度论中的一种可测集合）。如果$\Omega$是可数集合，那么两个定义在$\mathcal{F}$上的概率测度$P$和$Q$的全变分差异有一个等价形式
+    \begin{equation}
+        D_{TV}(P \Vert Q) = \frac{1}{2} \sum_{\omega \in \Omega}\vert P(\omega) - Q(\omega) \vert.
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    设集合$A_P = \{\omega \in \Omega: P(\omega) \ge Q(\omega)\}$ 以及 $A_Q = \{\omega \in \Omega: P(\omega) < Q(\omega)\}$。对于任意的$A \in \mathcal{F}$我们有
+    \begin{equation*}
+        P(A) - Q(A) \le P(A \cup A_P) - Q(A \cup A_P) \le P(A_P) - Q(A_P),
+    \end{equation*}
+    以及
+    \begin{equation*}
+        Q(A) - P(A) \le Q(A \cup A_Q) - P(A \cup A_Q) \le Q(A_Q) - P(A_Q),
+    \end{equation*}
+    所以
+    \begin{equation*}
+        \vert P(A) - Q(A) \vert \le \min[P(A_P) - Q(A_P), Q(A_Q) - P(A_Q)].
+    \end{equation*}
+    因为$A_P, A_Q \in \mathcal{F}$ 所以
+    \begin{equation*}
+        D_{TV}(P \Vert Q) = \min[P(A_P) - Q(A_P), Q(A_Q) - P(A_Q)].
+    \end{equation*}
+    因为$P(A_P) + P(A_Q) = Q(A_P) + Q(A_Q) = 1$所以
+    \begin{equation*}
+        P(A_P) - Q(A_P) = Q(A_Q) - P(A_Q),
+    \end{equation*}
+    所以
+    \begin{align*}
+        D_{TV}(P \Vert Q) =& \frac{1}{2}[P(A_P) - Q(A_P) + Q(A_Q) - P(A_Q)]\\
+        =& \frac{1}{2} \sum_{\omega \in \Omega} \vert P(\omega) - Q(\omega) \vert.
+    \end{align*}
+\end{proof}
+
+\begin{lemma}
+    设$\mathcal{F}$是样本空间$\Omega$的幂集合的$\sigma$-代数（测度论中的一种可测集合）。如果$\Omega$是可数集合，两个定义在$\mathcal{F}$上的概率测度$P$和$Q$的全变分差异有一个等价形式
+    \begin{equation}
+        D_{TV}(P \Vert Q) = \inf_{\mathcal{D}} \mathbb{P}_{(\omega_1, \omega_2) \sim \mathcal{D}}(\{\omega_1 \in \Omega, \omega_2 \in \Omega : \omega_1 \ne \omega_2\}),
+    \end{equation}
+    其中 $\mathcal{D}$ 是定义在$\Omega \times \Omega$上的联合分布，它的边缘分布分别是$P$和$Q$。
+\end{lemma}
+\begin{proof}
+    对于任意的$A \in \mathcal{F}$和任意的联合分布$\mathcal{D}$，有
+    \begin{align*}
+        &P(A) - Q(A)\\
+        =& P(\{\omega_1 \in A\}) + Q(\{\omega_2 \notin A\}) - 1\\
+        \le& \mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}}(\{\omega_1 \in A, \omega_2 \notin A\}) \\
+        \le& \mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}}(\{\omega_1 \ne \omega_2\}).
+    \end{align*}
+    所以$D_{TV}(P \Vert Q) \le \mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}}(\{\omega_1 \ne \omega_2\})$。
+    ($P(\{\omega_1 \in A\}) + Q(\{\omega_2 \notin A\}) - \mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}}(\{\omega_1 \in A, \omega_2 \notin A\}) \le 1$)
+
+    设集合$A_P = \{\omega \in \Omega: P(\omega) \ge Q(\omega)\}$ 以及 $A_Q = \{\omega \in \Omega: P(\omega) < Q(\omega)\}$。我们构造一个特殊的联合分布$\mathcal{D}^*$满足
+    \begin{equation*}
+        \mathbb{P}_{\mathcal{D}^*}(\omega_1, \omega_2) = 
+        \begin{cases}
+            Q(\omega_1) \cdot \mathbf{1}\{\omega_1 = \omega_2\}, & \omega_1 \in A_P, \omega_2 \in A_P; \\
+            P(\omega_1) \cdot \mathbf{1}\{\omega_1 = \omega_2\}, & \omega_1 \in A_Q,  \omega_2 \in A_Q; \\
+            \frac{[P(\omega_1) - Q(\omega_1)][Q(\omega_2) - P(\omega_2)]}
+            {P(A_P) - Q(A_P)} , & \omega_1 \in A_P, \omega_2 \in A_Q; \\
+            0, &otherwise.
+        \end{cases}
+    \end{equation*}
+    我们先证明它是一个分布：
+    \begin{align*}
+        &\sum_{\omega_1}\sum_{\omega_2} \mathbb{P}_{\mathcal{D}^*}(\omega_1, \omega_2)\\
+        =& \sum_{\omega_1 \in A_P, \omega_1 \in A_P} Q(\omega_1) \cdot \mathbf{1}\{\omega_1 = \omega_2\} \\
+        &+ \sum_{\omega_1 \in A_Q, \omega_1 \in A_Q} P(\omega_1) \cdot \mathbf{1}\{\omega_1 = \omega_2\}, \\
+        &+ \sum_{\omega_1 \in A_P}\sum_{\omega_2 \in A_Q}\frac{[P(\omega_1) - Q(\omega_1)][Q(\omega_2) - P(\omega_2)]} {P(A_p) - Q(A_p)} \\
+        =& Q(A_P) + P(A_Q) + \frac{[P(A_P) - Q(A_P)][Q(A_Q) - P(A_Q)]} {P(A_P) - Q(A_P)} = 1.
+    \end{align*}
+    那么
+    \begin{align*}
+        &\mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}^*}(\omega_1 \ne \omega_2)\\
+        =& 1 - \mathbb{P}_{(\omega_1, \omega_2)\sim\mathcal{D}^*}(\omega_1 =  \omega_2)\\
+        =& 1 - Q(A_P) - P(A_Q)\\
+        =& Q(A_Q) - P(A_Q) = D_{TV}(P \Vert Q).
+    \end{align*}
+    综上，得证。
+\end{proof}
+
+\subsubsection{置信域定理及其证明}
+
+本小节我们将介绍置信域定理\cite{kakade2002approximately}（Trust Region Theorem）。本小节首先定义了两个策略之间的全变分差异。接着为了给置信域定理的证明做准备，本小节将先介绍两个相关引理。最后本小节正式讨论置信域定理和它的证明。
+
+首先定义两个策略之间的最大变分差异：
+\begin{definition}[最大变分差异]
+    设一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，任意两个定义在$\mathcal{S} \times \mathcal{A}$上的策略$\pi_1$和$\pi_2$之间的最大变分差异为
+    \begin{equation}
+        D^{\max}_{TV}(\pi_1 \Vert \pi_2) = \max_{s} D_{TV}(\pi_1(\cdot \vert s) \Vert \pi_2(\cdot \Vert s)).
+    \end{equation}
+\end{definition}
+
+\begin{lemma}\label{lem:trust-region-lemma1}
+    设一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，它的优势函数为$A(s, a; \pi)$。那么，任意的两个策略$\pi_1$和$\pi_2$有如下关系：
+    \begin{equation}
+        \vert \mathbb{E}_{a \sim \pi_2(s)} [A(s, a; \pi_1)] \vert
+        \le 2 D^{\max}_{TV}(\pi_1 \Vert \pi_2) \max_{s, a} \vert A(s, a; \pi_1) \vert.
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    设任意一个定义在$\mathcal{A}\times\mathcal{A}$上的分布$\mathcal{D}$，满足$\mathcal{D}(\cdot \vert s)$的两个边缘分布分别为$\pi_1(\cdot \vert s)$和$\pi_2(\cdot \vert s)$。
+    \begin{align*}
+        &\mathbb{E}_{a \sim \pi_2(\cdot \vert s)} [A(s, a; \pi_1)] \\
+        =& \mathbb{E}_{a \sim \pi_2(\cdot \vert s)} [A(s, a; \pi_1)] - \mathbb{E}_{a \sim \pi_1(\cdot \vert s)} [A(s, a; \pi_1)]\\
+        =& \mathbb{E}_{(a1, a2) \sim \mathcal{D}(\cdot \vert s)}[A(s, a_2; \pi_1) - A(s, a_1; \pi_1)]\\
+        =& \mathbb{P}_{(a1, a2) \sim \mathcal{D}(\cdot \vert s)} [a1 \ne a2] \\ &\cdot
+        \mathbb{E}_{(a1, a2) \sim \mathcal{D}(\cdot \vert s)}[A(s, a_2; \pi_1) - A(s, a_1; \pi_1) \vert a1 \ne a2].
+    \end{align*}
+    因此，我们可得
+    \begin{equation*}
+        \vert \mathbb{E}_{a \sim \pi_2(\cdot \vert s)} [A(s, a; \pi_1)] \vert 
+        \le 2 D^{\max}_{TV}(\pi_1 \Vert \pi_2) \max_{s, a} \vert A(s, a; \pi_1) \vert.
+    \end{equation*}
+\end{proof}
+
+\begin{lemma}\label{lem:trust-region-lemma2}
+    设一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，分布$\mathbf{p}_t(s;\pi)$表示策略$\pi$对应的马尔科夫链的轨迹中第$t$时刻状态的分布。那么，任意的两个策略$\pi_1$和$\pi_2$有如下关系：
+    \begin{equation}\label{equ:trust-region-lemma2}
+        D_{TV}(\mathbf{p}_t(\cdot; \pi_1) \Vert \mathbf{p}_t(\cdot; \pi_2)) \le t D^{\max}_{TV}(\pi_1 \Vert \pi_2).
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    我们将使用数学归纳法来证明。
+
+    第一步，当$t=0$时，初始状态分布$\mathbf{p}_0(\cdot; \pi_1)$和$\mathbf{p}_0(\cdot; \pi_2))$都等于马尔科夫决策过程的状态分布$\mathbf{p}_0$，所以\eqref{equ:trust-region-lemma2}式两边都为0，满足引理。
+
+    第二步，我们证明
+    \begin{equation*}
+        D_{TV}(\mathbf{p}_{t+1}(\cdot; \pi_1) \Vert \mathbf{p}_{t+1}(\cdot; \pi_2)) \le D^{\max}_{TV}(\pi_1 \Vert \pi_2) + D_{TV}(\mathbf{p}_{t}(\cdot; \pi_1) \Vert \mathbf{p}_{t}(\cdot; \pi_2)).
+    \end{equation*}
+    具体过程如下
+    \begin{align*}
+        &D_{TV}(\mathbf{p}_{t+1}(\cdot; \pi_1) \Vert \mathbf{p}_{t+1}(\cdot; \pi_2)) \\
+        =& \frac{1}{2} \sum_{s_{t+1}} \vert \mathbf{p}_{t+1}(s_{t+1}; \pi_1) - \mathbf{p}_{t+1}(s_{t+1}; \pi_2) \vert \\
+        =& \frac{1}{2} \sum_{s_{t+1}} 
+        \bigg\vert \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_1) \pi_1(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \\
+        & - \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_2) \pi_2(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \bigg\vert \\
+        \le& \frac{1}{2} \sum_{s_{t+1}} 
+        \bigg\vert \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_1) \pi_1(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \\
+        & - \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_1) \pi_2(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \bigg\vert \\
+        &+ \frac{1}{2} \sum_{s_{t+1}} 
+        \bigg\vert \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_1) \pi_2(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \\
+        &- \sum_{s_t, a_t} \mathbf{p}_t(s_t; \pi_2) \pi_2(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \bigg\vert \\
+        \le& \frac{1}{2} \sum_{s_{t+1}, s_t, a_t} \mathbf{p}_t(s_t; \pi_1)
+            \vert \pi_1(a_t \vert s_t) - \pi_2(a_t \vert s_t) \vert \mathbf{P}(s_{t+1} \vert s_t, a_t)\\
+        &+ \frac{1}{2} \sum_{s_{t+1}, s_t, a_t} 
+            \vert \mathbf{p}_t(s_t; \pi_1) - \mathbf{p}_t(s_t; \pi_2) \vert \pi_2(a_t \vert s_t) \mathbf{P}(s_{t+1} \vert s_t, a_t) \\
+        \le& D_{TV}^{\max}(\pi_1 \Vert \pi_2) + D_{TV}(\mathbf{p}_{t, \pi_1} \Vert \mathbf{p}_{t, \pi_2})
+    \end{align*}
+    综合第一步和第二步，引理得证。
+\end{proof}
+
+至此，我们已经完成了置信域定理所需要的所有准备工作，终于进入置信域定理的介绍和证明。
+
+\begin{theorem}[置信域定理，Trust Region Theorem]
+    设一个马尔可夫决策过程$\mathcal{MDP} = \{\mathcal{S}, \mathcal{A}, \mathbf{p}_0, \mathbf{P}, R, \gamma\}$，它的策略评价函数为$\rho(\pi)$，它的关于策略$\pi'$的相关策略评价函数为$L(\pi_1, \pi_2)$。那么$\rho(\pi_1)$和$L(\pi_1, \pi_2)$的关系为
+    \begin{equation}
+        \vert \rho(\pi_1) - L(\pi_1, \pi_2) \vert \le \frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_2) \vert}{1 - \gamma} 
+            [D^{\max}_{TV} (\pi_1 \Vert \pi_2)]^2.
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    首先根据引理\ref{lem:trust-region-lemma1}
+    \begin{align*}
+    & \vert \rho(\pi_1) - L(\pi_1, \pi_2) \vert \\
+    =& \bigg\vert \sum_{s} \mathbf{p}_{\gamma}(s; \pi_1) \sum_a \pi_1(a \vert s) A(s, a, \pi_2) \\
+    &- \sum_{s} \mathbf{p}_{\gamma}(s; \pi_2) \sum_a \pi_1(a \vert s) A(s, a, \pi_2) \bigg\vert \\
+    \le& \bigg\vert \sum_{s} [\mathbf{p}_{\gamma}(s; \pi_1) - \mathbf{p}_{\gamma}(s; \pi_2)] \sum_a \pi_1(a \vert s) A(s, a; \pi_1)\bigg\vert \\
+    \le& \bigg\vert \sum_{s} [\mathbf{p}_{\gamma}(s; \pi_1) - \mathbf{p}_{\gamma}(s; \pi_2)] \bigg\vert
+    \cdot 2 D^{\max}_{TV}(\pi_1 \Vert \pi_2) \max_{s, a} \vert A(s, a; \pi_2) \vert.
+    \end{align*} 
+    接着，我们继续研究$\mathbf{p}_\gamma(\cdot; \pi_1)$和$\mathbf{p}_\gamma(\cdot;\pi_2)$之间的关系。
+    \begin{align*}
+        &\bigg\vert \sum_{s} [\mathbf{p}_{\gamma}(s; \pi_1) - \mathbf{p}_{\gamma}(s; \pi_2)] \bigg\vert \\
+        =& \bigg\vert (1 - \gamma) \sum^{\infty}_{t = 0} \gamma^t [\mathbf{p}_t(s; \pi_1) - \mathbf{p}_t(s; \pi_2)] \bigg\vert\\
+        \le& (1 - \gamma) \sum^{\infty}_{t=0} \gamma^t \sum_{s} \vert \mathbf{p}_t(s; \pi_1) - \mathbf{p}_t(s; \pi_2) \vert \\
+        =& (1 - \gamma) \sum^{\infty}_{t=0} \gamma^t \cdot 2 D_{TV}(\mathbf{p}_t(\cdot; \pi_1) \Vert \mathbf{p}_t(\cdot; \pi_2))\\
+        \le& (1 - \gamma) \sum^{\infty}_{t=0} \gamma^t \cdot 2 t D^{\max}_{TV}(\pi_1 \Vert \pi_2)\\
+        =& \frac{2\gamma}{1 - \gamma} D^{\max}_{TV}(\pi_1 \Vert \pi_2).
+    \end{align*}
+    其中，最后一步用到了引理\ref{lem:trust-region-lemma2}。
+    综上我们可得
+    \begin{align*}
+        \vert \rho(\pi_1) - L(\pi_1, \pi_2) \vert \le \frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_2) \vert}{1 - \gamma} 
+            [D^{\max}_{TV} (\pi_1 \Vert \pi_2)]^2.
+    \end{align*}
+\end{proof}
+
+通常，马尔可夫决策过程的奖励函数是一个有界函数，所以它的优势函数也是有界的。所以，只要能够保证$\pi_1$和$\pi_2$之间的最大变分差异限制在阈值内，就能保证$\rho(\pi_1)$和$L(\pi_1, \pi_2)$的差异限制在某个范围内。
+
+置信域定理暗示了一个新的策略优化算法：在策略$\pi_n$处优化如下子问题
+\begin{equation}\label{equ:trust-region-improvement}
+    \max_{\pi} L(\pi, \pi_n) - \frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_n) \vert}{1 - \gamma} [D^{\max}_{TV} (\pi \Vert \pi_n)]^2.
+\end{equation}
+因为
+\begin{equation}
+    L(\pi_n, \pi_n) - \frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_n) \vert}{1 - \gamma} [D^{\max}_{TV} (\pi_n \Vert \pi_n)]^2 = \rho(\pi_n),
+\end{equation}
+所以\eqref{equ:trust-region-improvement}式对应的子问题的解$\pi_{n+1}$一定能够满足
+\begin{equation}
+    \rho(\pi_{n+1}) \ge L(\pi_{n+1}, \pi_n) - \frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_n) \vert}{1 - \gamma} [D^{\max}_{TV} (\pi_{n+1} \Vert \pi_n)]^2
+    \ge \rho(\pi_n),
+\end{equation}
+即策略一定会越来越好。
+
+由于系数$\frac{4 \gamma \max_{s, a} \vert A(s,a; \pi_n) \vert}{1 - \gamma}$并不好确定，通常将\eqref{equ:trust-region-improvement}式简化为一个置信域受限优化
+\begin{equation}
+    \max_{\pi} L(\pi, \pi_n), \quad s.t.\quad D^{\max}_{TV}(\pi \Vert \pi_n) \le \delta.
+\end{equation}
+其中$\delta$是人为设定的超参数。当$\delta$足够小时，依旧可以保证策略是单调上升的。
+
+\subsection{置信域策略优化算法}
+
+在上一小节中，本文介绍了置信域定理，并提出了一个迭代优化算法。但是，当我们使用参数化的策略时，这个迭代优化算法不再高效。\cite{schulman2015trust}等人在此基础上，构造了一个更加实用的策略优化算法——\textbf{置信域策略优化算法}\cite{schulman2015trust}（Trust Region Policy Optimization, TRPO）。本文将介绍它的推导，以及它和梯度优化算法中的\textbf{自然梯度优化算法}\cite{amari1998natural}的关系，最后将揭示置信域策略优化算法本质上是在一个概率空间上对一个参数化的策略函数进行优化。
+
+\begin{definition}[相对熵，Kullback-Leibler Divergence]
+    任意两个分布$P(x)$和$Q(x)$，它们的相对熵是
+    \begin{equation}
+        D_{KL}(P \Vert Q) = \sum_{x} P(x) \ln \frac{P(x)}{Q(x)}.
+    \end{equation}
+    对于连续分布$p(x)$和$q(x)$，它们的相对熵是
+    \begin{equation}
+        D_{KL}(p \Vert q) = \int_{x} p(x) \ln \frac{p(x)}{q(x)} \mathrm{d}x.
+    \end{equation}
+\end{definition}
+相对熵是衡量两个分布之间差异性的另一个距离。平斯科尔不等式揭示了相对熵和全变分差异之间的关系。
+\begin{theorem}[平斯科尔不等式，Pinsker Inequality]
+    对于两个分布$P$和$Q$，他们的相对熵和全变分差异之间的关系是
+    \begin{equation}
+        D_{TV}(P \Vert Q) \le \sqrt{\frac{1}{2} D_{KL}(P \Vert Q)}.
+    \end{equation}
+\end{theorem}
+根据平斯科尔不等式可知，我们可以通过限制两个分布之间的相对熵来间接限制两个分布之间的全变分差异。
+
+我们定义两个策略$\pi_1$和$\pi_2$之间\textbf{最大相对熵}为：
+\begin{equation}
+    D^{\max}_{KL}(\pi_1 \Vert \pi_2) = \max_s D_{KL}(\pi_1(\cdot \vert s) \Vert \pi_2(\cdot \Vert s)).
+\end{equation}
+平斯科尔不等式保证了$[D^{\max}_{TV}(\pi_1 \Vert \pi_2)]^2 \le D^{\max}_{KL}(\pi_1 \Vert \pi_2)/2$。我们将\eqref{equ:trust-region-improvement}式中的全变分差异替换为相对熵就可以得到一个新的算法：
+\begin{equation}
+    \max_{\pi} L(\pi, \pi_n) - \frac{2 \gamma \max_{s, a} \vert A(s,a; \pi_n) \vert}{1 - \gamma} D^{\max}_{KL} (\pi_n \Vert \pi).
+\end{equation}
+由于相对熵前的系数在无模型的设定下是无法求解的，所以我们选择将其转化为一个受限优化问题：
+\begin{equation}\label{equ:trpo-equ1}
+    \max_{\pi} L(\pi, \pi_n), \quad s.t.\quad D^{\max}_{KL}(\pi_n \Vert \pi) \le \delta,
+\end{equation}
+其中$\delta$是一个人为设定的限制域半径。
+
+这个受限优化问题依旧非常难求解，置信域策略优化算法提出使用一系列近似技术来进一步构造真正实用的算法。 继续讨论接下来的简化技术前，需要做出一些说明。我们使用参数$\theta$来参数化策略，所以\eqref{equ:trpo-equ1}式可以改写为
+\begin{equation}
+    \max_{\theta} L(\theta, \theta_n), \quad s.t.\quad D^{\max}_{KL}(\theta_n \Vert \theta) \le \delta.
+\end{equation}
+
+第一个问题是在无模型的设定下，$D^{\max}_{KL}(\theta_n \Vert \theta)$求解困难。这里人为构造一个简化的平均相对熵距离：
+\begin{equation}
+    D^{p}_{KL}(\theta_n \Vert \theta) = \mathbb{E}_{s \sim p}[D_{KL}(\pi(\cdot \vert s; \theta_n) \Vert \pi(\cdot \vert s; \theta))].
+\end{equation}
+我们可以通过采样的方式来估计平均相对熵距离将受限优化问题改写为期望的形式可得
+\begin{equation}
+    \begin{aligned}
+    \max_{\theta} &\mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_n), a \sim \pi(\cdot \vert s; \theta_n)} \bigg[ \frac{\pi(a \vert s; \theta)}{\pi(a \vert s; \theta_n)} A(s, a; \theta_n)\bigg], \\
+    s.t. & \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_n), a \sim \pi(\cdot \vert s; \theta_n)} [\ln \pi(a \vert s; \theta_n) - \ln \pi(a \vert s; \theta)] \le \delta.
+    \end{aligned}
+\end{equation}
+至此，每一步的受限优化问题依旧非常难解，需要进一步简化。
+
+首先使用一阶泰勒展开式将原问题简化：
+\begin{equation}
+    L(\theta, \theta_n) \approx L(\theta_n, \theta_n) + \nabla_{\theta=\theta_n} L(\theta, \theta_n) (\theta - \theta_n).
+\end{equation}
+接着使用二阶泰勒展开式将限制条件简化：
+\begin{equation}
+    \begin{aligned}
+    D^{p}_{KL}(\theta_n \Vert \theta) \approx& D^{p}_{KL}(\theta_n \Vert \theta_n) + \nabla_{\theta=\theta_n} D^{p}_{KL}(\theta_n \Vert \theta) (\theta - \theta_n) \\
+    & + \frac{1}{2} (\theta - \theta_n)^T \nabla^2_{\theta=\theta_n} D^{p}_{KL}(\theta_n \Vert \theta) (\theta - \theta_n),
+    \end{aligned}
+\end{equation}
+（因为$\theta_n$是函数的$D^{p}_{KL}(\theta_n \Vert \theta)$的最小值点，所以它的一阶导数恒等于0）。
+简化后的受限约束问题就变成了
+\begin{equation}
+    \begin{aligned}
+    \max_{\theta}&\quad g^T_n (\theta - \theta_n),\\
+    s.t.&\quad (\theta - \theta_n)^T H_n (\theta - \theta_n) \le 2 \delta.
+    \end{aligned}
+\end{equation}
+其中$g_n = \nabla_{\theta=\theta_n} L(\theta, \theta_n)$ 并且 $H_n = \nabla^2_{\theta=\theta_n} D^{p}_{KL}(\theta_n \Vert \theta)$。
+我们使用拉格朗日算子来将约束优化问题转化为无约束优化问题：
+\begin{equation}
+    \max_{\theta}\min_{\lambda \ge 0} g^T_n(\theta - \theta_n) + \lambda[2\delta - (\theta - \theta_n)^T H_n (\theta - \theta_n)],
+\end{equation}
+根据强对偶性可以得到一个等价问题
+\begin{equation}
+    \min_{\lambda \ge 0}\max_{\theta} g^T_n(\theta - \theta_n) + \lambda[2\delta - (\theta - \theta_n)^T H_n (\theta - \theta_n)].
+\end{equation}
+首先我们求解内部问题，可得$g_n - 2 \lambda H_n(\theta^* - \theta_n) = 0$，即
+\begin{equation}
+    \theta^* = \theta_n + H^{-1}_n g_n /(2\lambda).
+\end{equation}
+带入$\theta^2$后，外部问题变成了
+\begin{eqnarray}
+    \min_{\lambda \ge 0} g^T_n H_n^{-1} g_n / (2 \lambda) + \lambda[2\delta - g^T_n H^{-1}_n g_n/(4\lambda^2)],
+\end{eqnarray}
+并且这个问题的最优解是
+\begin{equation}
+    \lambda^* = \sqrt{\frac{g^T_n H^{-1}_n g_n}{8\lambda}}.
+\end{equation}
+最后，带入$\lambda^*$后我们可得
+\begin{equation}
+    \theta_{n+1} = \theta^* = \theta_n + \sqrt{\frac{2\delta}{g^T_n H^{-1}_n g_n}} H^{-1}_n g_n.
+\end{equation}
+
+至此，我们已经获得了置信域策略优化算法的核心更新步骤。这个核心更新规则完全等价于优化理论中的\textbf{自然梯度下降法}\cite{amari1998natural}。其实也比较好理解：我们求解的带约束的优化问题本质上是在交叉熵为距离的\textbf{概率空间}中，求解点$\pi_n$邻域中的最快上升方向。因为它本质就是一种梯度的定义，所以我们可以将这个更新方式看成是在概率空间上进行的一次梯度下降。这个下降方式修正了参数化策略函数带来的影响，提高了梯度优化算法的效率。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总的优化步数$N$, 可以交互采样的马尔可夫决策过程的环境$env$。}
+    \KwOut{最优策略$\pi^*$}
+    随机初始化一个值函数$V(s; \theta_V)$和一个策略函数$\pi(a \vert s; \theta_\pi)$\;
+    \For(){$n = 1,2, \ldots, N$}{
+        执行$\pi(a \vert s; \theta_\pi)$从环境$env$中采集$M$条长度为$T$的轨迹$\mathcal{D}_M=\{\tau_i\}^{M}_{i=1}$\;
+        $\hat V(s^{(i)}_t) = \sum^{T}_{t' = t} \gamma^{t'-t}r^{(i)}_{t'}$\;
+        $\theta_V = \arg\min_{\theta_V} \frac{1}{2M(T+1)} \sum^{M}_{i=1}\sum^{T}_{t=0} [V(s^{(i)}_t; \theta_V) - \hat V(s^{(i)}_t)]^2$\;
+        $\hat A(s^{(i)}_t, a^{(i)}_t) = \sum^{T-1}_{t' = t} \lambda^{t' - t}[r^{(i)}_{t'} + \gamma V(s^{(i)}_{t'+1}, \theta_V) - V(s^{(i)}_{t'}; \theta_V)]$\;
+        $\hat g_n = \frac{1}{MT} \sum^{M}_{i=1} \sum^{T-1}_{t=0}\nabla_{\theta} \ln \pi(a^{(i)}_t \vert s^{(i)}_t; \theta_\pi) \hat A(s^{(i)}_t, a^{(i)}_t)$\;
+        \For(){$j = 0, 1, \ldots, K$}{
+            $\theta'_{\pi} = \theta_{\pi} + \alpha^j \sqrt{\frac{2\delta}{\hat g^T_n \hat H^{-1}_n \hat g_n}} \hat H^{-1}_n \hat g_n$\;
+            \If{$D^{p}_{KL}(\theta_{\pi} \Vert \theta'_{\pi})\le \delta$}{
+                $\theta_\pi = \theta'_\pi$\;
+                break\;
+            }
+        }
+    }
+    \KwRet{$\pi(a \vert s; \theta_\pi)$}
+    \caption{置信域策略优化}
+\end{algorithm}
+
+这个算法在实践中有一些需要注意的点。首先因为我们需要求解概率密度$\ln \pi(a \vert s; \theta_\pi)$的梯度（连续动作马尔可夫决策过程），所以算法对参数化的策略函数的形式有一定的限制，所以通常这个算法使用高斯分布作为策略函数的基本形式，然后使用神经网络来参数化高斯分布的均值和方差，即$\pi(a \vert s; \theta_\pi) = \mathcal{N}(\mu(\theta_\pi), \sigma(\theta_\pi))$。其次，由于我们的更新方式在推导过程中使用了大量的近似产生了误差，所以算法在更新参数前进行了一步检验操作，来检测更新后的参数是否满足交叉熵的置信域要求。如果不满足要求，算法就对更新步长进行缩放，直到满足要求（这一步也叫做\textbf{回溯}，backtrack）。最后，算法可以使用\textbf{共轭梯度法}\cite{shewchuk1994introduction}（Conjugate Gradient Algorithm）（引用）来直接求解$H_n^{-1}g_n$从而降低算法的计算复杂度。
+
+\subsection{近邻策略优化算法}
+
+置信域策略优化算法最大的问题就是它的计算复杂度非常高。尽管从理论的角度来说，置信域策略优化算法具有非常好的数学意义，它是向以相对熵作为距离的概率空间中的概率梯度方向进行优化的算法。但是作为强化学习来说，我们更需要一个计算更加简单基于置信域定理的策略优化算法。本节将介绍一个非常易于理解并且在实践中和置信域策略优化算法同样高效的算法——\textbf{近邻策略优化算法}\cite{schulman2017proximal}（Proximal Policy Optimization，PPO）。近似策略优化算法有非常多的形式，本小节将介绍其中最基本的形式——截断近似策略优化算法（PPO-clip）。
+
+基于策略梯度公式的算法则在理论上能够保证梯度的单调上升，算法实现简单，同时也能够处理连续动作空间的问题，所以经常被大型的工程中\cite{vinyals2019alphastar,akkaya2019solving,berner2019dota}用来作为首选算法。但是它们需要执行当前策略来采集的样本来估计策略梯度，所以它们的采样复杂度非常高，所以后面的章节将介绍一个新的框架来解决这个问题。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总的优化步数$N$, 可以交互采样的马尔可夫决策过程的环境$env$。}
+    \KwOut{最优策略$\pi^*$}
+    随机初始化一个值函数$V(s; \theta_V)$和一个策略函数$\pi(a \vert s; \theta_\pi)$\;
+    \For(){$n = 1,2, \ldots, N$}{
+        执行$\pi(a \vert s; \theta_\pi)$从环境$env$中采集$M$条长度为$T$的轨迹$\mathcal{D}_M=\{\tau_i\}^{M}_{i=1}$\;
+        $\hat V(s^{(i)}_t) = \sum^{T}_{t' = t} \gamma^{t'-t}r^{(i)}_{t'}$\;
+        $\theta_V = \arg\min_{\theta_V} \frac{1}{2M(T+1)} \sum^{M}_{i=1}\sum^{T}_{t=0} [V(s^{(i)}_t; \theta_V) - \hat V(s^{(i)}_t)]^2$\;
+        $\hat A(s^{(i)}_t, a^{(i)}_t) = \sum^{T-1}_{t' = t} \lambda^{t' - t}[r^{(i)}_{t'} + \gamma V(s^{(i)}_{t'+1}, \theta_V) - V(s^{(i)}_{t'}; \theta_V)]$\;
+        $\theta'_\pi = \theta_\pi$\;
+        \For(){$j = 0, 1, \ldots, K$}{
+            $rt(a^{(i)}_t \vert s^{(i)}_t; \theta'_{\pi}, \theta_{\pi}) = \frac{\pi(a^{(i)}_t \vert s^{(i)}_t; \theta'_{\pi})}{\pi(a^{(i)}_t \vert s^{(i)}_t; \theta_{\pi})}$\;
+            $L(\theta'_\pi) = \frac{1}{MT} \sum^{M}_{i=1} \sum^{T-1}_{t=0}\min \{rt(a^{(i)}_t \vert s^{(i)}_t;\theta'_{\pi}, \theta_{\pi}) \hat A(s^{(i)}_t, a^{(i)}_t),$ 
+            $clip[rt(a^{(i)} \vert s^{(i)}_t; \theta'_{\pi}), 1 - \epsilon, 1/(1-\epsilon)] \hat A(s^{(i)}_t, a^{(i)}_t)\}$\;
+            $\theta'_{\pi} = \theta'_{\pi} + \alpha \nabla_{\theta'_\pi} L(\theta'_\pi)$\;
+            \If{$D^{p}_{KL}(\theta_{\pi} \Vert \theta'_{\pi}) \ge \delta$}{
+                $\theta_\pi = \theta'_\pi$\;
+                break\;
+            }
+        }
+    }
+    \KwRet{$\pi(a \vert s; \theta_\pi)$}
+    \caption{近邻策略优化}
+\end{algorithm}
+
+近邻策略优化算法和置信域策略优化算法最核心的不同就是它们所使用的置信域不同，近邻策略优化算法使用了一个更加简单的置信域——$\epsilon$-置信域。
+\begin{definition}[$\epsilon$-置信域]
+    对于一个策略$\pi$，它的$\epsilon$-置信域定义如下
+    \begin{equation}
+        \epsilon(\pi) = \{(1 - \epsilon) \pi + \epsilon \pi', \forall \pi\},
+    \end{equation}
+    其中$\epsilon \in (0, 1)$。
+\end{definition}
+策略$\pi$的$\epsilon$-置信域中的每一个策略都等价于以$1 - \epsilon$的概率执行策略$\pi$，以$\epsilon$的概率执行某一个其他策略$\pi'$。以下引理揭示了它和最大全变分差异的关系：
+\begin{lemma}
+    如果$\pi_2 \in \epsilon(\pi_1)$，那么
+    \begin{equation}
+        D^{\max}_{TV}(\pi_1 \Vert \pi_2) \le \epsilon.
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    \begin{align*}
+        &D^{\max}_{TV}(\pi_1 \Vert \pi_2) \\
+        =& \max_{s} \frac{1}{2} \sum_{a} \vert \pi_1 (a \vert s) - \pi_2(a \vert s) \vert \\
+        =& \max_{s} \frac{1}{2} \sum_{a} \epsilon \vert \pi_1 (a \vert s) - \pi(a \vert s) \vert \le \epsilon.
+    \end{align*}
+\end{proof}
+
+从$\epsilon$-置信域中得到启发，我们可以构造一个新的受限优化问题：
+\begin{equation}
+    \begin{aligned}
+    \max_{\pi}&\quad L(\pi, \pi_n),\\
+    s.t.&\quad \pi \in \epsilon(\pi_n), \pi_n \in \epsilon(\pi).
+    \end{aligned}
+\end{equation}
+本文在这里特意没有使用参数化的策略，因为从未参数化的策略的角度更容易分析出一些问题。从未参数化的$\pi$所在的$\mathcal{S}\times\mathcal{A}$的集合来看，$\epsilon(\pi)$是一个凸集合。另一方面，$L(\pi, \pi_n)$是关于$\pi$的一个线性函数。所以，最优值通常取在$\epsilon$-置信域的边界点上。那么，接下来我们来研究以下$\epsilon$的边界的特点。
+
+从$\epsilon$-置信域的定义可得：对于任意的$s\in\mathcal{S}$和$a\in\mathcal{A}$，
+\begin{equation}
+    \begin{cases}
+        \pi(a\vert s) \ge (1 - \epsilon) \pi_n(a \vert s),\\
+        \pi_n(a \vert s) \ge (1 - \epsilon) \pi(a \vert s).
+    \end{cases}
+\end{equation}
+化简可得
+\begin{equation}
+    1 - \epsilon \le \frac{\pi(a \vert s)}{\pi_n(a \vert s)} \le \frac{1}{1 - \epsilon}.
+\end{equation}
+为了简化计算，我们构造一个近似的无约束优化问题（参数化策略函数）：
+\begin{equation}\label{equ:ppo-clip-loss}
+    \begin{aligned}
+    \min_{\theta} &L^{CLIP}(\theta，\theta_n) = \\ 
+    &\mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_n), a \sim \pi(\cdot \vert s; \theta_n)}
+    \bigg[
+        clip\bigg(rt(a \vert s; \theta, \theta_n), 1 - \epsilon, \frac{1}{1 - \epsilon}
+        \bigg) A(s, a; \theta_n)
+    \bigg].
+    \end{aligned}
+\end{equation}
+其中$rt(a \vert s; \theta, \theta_n) = \frac{\pi(a \vert s; \theta)}{\pi(a \vert s; \theta_n)}$。
+
+这个无约束的优化问题有一定的合理性同时也存在着一些参数化引发的问题。首先我们先来看它的合理性。因为起始优化时$\theta = \theta_n$，所以$rt(a \vert s; \theta, \theta_n)=1$。当$A(s, a; \theta_n) > 0$时，梯度优化算法会将$rt(a \vert s; \theta, \theta_n)$往$1/(1 - \epsilon)$方向优化。当$A(s, a; \theta_n) < 0$时，梯度优化算法会将$rt(a \vert s; \theta, \theta_n)$往$1 - \epsilon$方向优化。当$rt(a \vert s; \theta, \theta_n)$超出边界值$1/(1 - \epsilon)$或者$1 - \epsilon$时，损失函数对应的梯度为0，也就保证了$rt(a \vert s; \theta,\theta_n)$不再继续远离边界值。同时梯度优化算法使用一个小步长，以此保证$rt(a \vert s; \theta, \theta_n)$不要超出边界值过多。综上，损失函数$L^{CLIP}(\theta, \theta_n)$保证了梯度优化算法更新的$\theta$保持在置信域的附近。
+
+接下来，我们解释以下参数化策略会引发的问题。假设$rt(s\vert a; \theta, \theta_n)$已经优化到边界点了，但是$rt(s'\vert a'; \theta, \theta_n)$还未优化到边界点。那么梯度优化算法对$rt(s'\vert a';\theta, \theta_n)$进行优化时，参数化的策略函数值$\pi(a \vert s; \theta)$也会不可避免地被修改，即$rt(s\vert a; \theta, \theta_n)$会被修改。这就引发了两个问题：一是$rt(s\vert a; \theta, \theta_n)$会继续远离边界值；二是$rt(s\vert a; \theta, \theta_n)$可能反向远离边界值。我们假设$A(s, a; \theta_n) > 0$，那么$rt(s\vert a; \theta, \theta_n)$应该往$1/(1 - \epsilon)$方向优化，但是由于其他状态动作点的影响，梯度有可能使$rt(s\vert a; \theta, \theta_n) < 1 - \epsilon$，反之亦然，这种现象我们称为\textbf{反向远离边界值}。反向远离边界值后，损失函数$L^{CLIP}(\theta, \theta_n)$在(s, a)点同样不会产生梯度，梯度优化算法也就不会弥补这个问题。
+
+针对第一个问题，算法在求解子问题\eqref{equ:ppo-clip-loss}时，会检测当前策略$\pi(a \vert s; \theta)$和$\pi(a \vert s; \theta_n)$的相对熵是否超出了某个阈值，如果超出了阈值，就停止求解子问题。针对第二个问题，算法会对$L^{CLIP}(\theta, \theta_n)$做一些修改:
+\begin{equation}
+    \begin{aligned}
+    \min_{\theta} L^{CLIP}(\theta，\theta_n) =& 
+    \mathbb{E}_{s \sim \mathbf{p}_{\gamma}(\cdot; \theta_n), a \sim \pi(\cdot \vert s; \theta_n)}\bigg\{
+    \min
+    \bigg[
+        rt(a \vert s; \theta, \theta_n) A(s, a; \theta_n), \\
+        & clip\bigg(rt(a \vert s; \theta, \theta_n), 1 - \epsilon, \frac{1}{1 - \epsilon}
+        \bigg) A(s, a; \theta_n)
+    \bigg]
+    \bigg\}.
+    \end{aligned}
+\end{equation}
+当$A(s, a; \theta_n) > 0$并且$rt(s, a; \theta_n) < 1 - \epsilon$时，损失函数会在$(s, a)$点取值到$rt(a \vert s; \theta, \theta_n)A(s, a; \theta_n)$，因此梯度优化算法使$rt(a \vert s; \theta, \theta_n)$往$1/(1 - \epsilon)$方向优化。当$A(s, a; \theta_n) < 0$并且$rt(s, a; \theta) > 1 / (1 - \epsilon)$时，损失函数会在$(s, a)$点取值到$rt(a \vert s; \theta, \theta_n)A(s, a; \theta_n)$，因此梯度优化算法会使$rt(a \vert s; \theta, \theta_n)$往$1 - \epsilon$方向优化。从而，新的损失函数解决了反向远离边界值的问题。
+\subsection{本章小结}
+本章在策略梯度优化算法中引入了置信域，构造了带约束的优化问题，提高了算法的稳定性。本章首先介绍了策略的值函数的差分以及它的特性，然后引出并证明了置信域定理。本章介绍了两个基于置信域定理构建的算法：一个是基于相对熵的置信域构建的算法——置信域策略优化算法，它本质上是一个自然梯度优化算法；二是基于$\epsilon$-置信域构建的算法——近邻策略优化，它相比于置信域策略优化算法来说，计算简单很多，并且在实际实验中效果和置信域策略优化算法相同。

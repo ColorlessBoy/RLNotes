@@ -1,0 +1,408 @@
+\section{批判执行算法}
+
+在前面的章节中介绍了两类强化学习算法：基于最优贝尔曼等式的算法和基于策略梯度公式的算法。本章节将介绍一种新的强化学习框架——批判执行算法（Actor-Critic Algorithm），结合了前面两种算法共同的特性，既可以处理连续动作空间的强化学习问题，又大大降低了采样复杂度。在本节中将介绍三个算法：一是基于确定性策略梯度的\textbf{深度确定性策略优化算法}\cite{christiano2017deep}（Deep Deterministic Policy Gradient, DDPG），二是基于深度确定性策略优化算法的改进算法\textbf{双延迟深度确定性策略优化算法}\cite{fujimoto2018addressing}（Twin Delayed Deep Deterministic Policy Gradient, TD3），三是基于最大熵理论的\textbf{最大熵批判执行算法}\cite{haarnoja2018soft}（Soft Actor-Critic，SAC）。
+
+\subsection{深度确定性策略优化算法}
+
+本小节将介绍首个解决连续性强化学习问题的异策略强化学习算法——深度确定性策略优化算法\cite{christiano2017deep}（Deep Deterministic Policy Optimization，DDPG）。它的流程非常简单，代码易于实现，所以到现在为止，它在强化学习中的使用频率也非常高。本小节将先介绍它的理论基础——确定性策略梯度\cite{silver2014deterministic}（Deterministic Policy Gradient），然后再介绍它的具体流程。
+
+\subsubsection{确定性策略梯度}
+
+本小节的内容将涉及确定性策略梯度及其定义。顾名思义，确定性策略梯度就是指策略是确定性策略时，强化学习的目标函数关于策略参数的导数。在确定性策略梯度被提出前，人们一度认为关于确定性策略的梯度时不存在的，而\cite{silver2014deterministic}则提出了这个确定性策略梯度，并且证明了它正是随机策略梯度在随机性策略收敛为确定性策略后的极限。
+
+首先我们参数化一个确定性策略。一个确定性策略在任何状态只会做出某个确定的动作，即$a = \pi(s)$，所以一个参数化的确定性策略的形式为
+\begin{equation}
+    a = \pi(s; \theta_\pi).
+\end{equation}
+马尔可夫决策问题的目标是
+\begin{equation}
+    \max_{\theta_\pi} \rho(\theta_\pi) = \int_s p_0(s) Q(s, \pi(s;\theta_\pi), \theta_\pi)\mathrm{d} s.
+\end{equation}
+确定性策略梯度定理告诉我们可以对函数$\rho(\theta_\pi)$求梯度。
+
+\begin{theorem}[确定性策略梯度，Deterministic Policy Gradient]
+    一个马尔可夫决策过程$\{\mathcal{S}, \mathcal{A}, p_0, P, R, \gamma\}$以及它的奖励函数$\rho(\theta_\pi)$。如果我们使用确定性策略$\pi(s;\theta_\pi)$，那么，奖励函数关于参数的梯度为
+    \begin{equation}
+        \begin{aligned}
+            \rho(\theta_\pi) =& \int_{s} p_{\gamma}(s; \theta_\pi) \nabla_{\theta_\pi} \pi(s; \theta_\pi) \cdot \nabla_{a = \pi(s;\theta_\pi)} Q(s, a; \theta_\pi) \mathrm{d} s \\
+            =& \mathbb{E}_{s \sim p_{\gamma}(\cdot;\theta_\pi)}
+            \bigg[\nabla_{\theta_\pi} \pi(s; \theta_\pi) \cdot \nabla_{a = \pi(s; \theta_\pi)} Q(s, a; \theta_\pi)\bigg],
+        \end{aligned}
+    \end{equation}
+    其中$p_\gamma(s; \theta_\pi) = (1 - \gamma) \sum^{\infty}_{t=0} \gamma^t p_t(s; \theta_\pi)$，并且$p_t(s; \theta_\pi)$表示马尔科夫链$\mathcal{MDP}(\theta_\pi)$中$t$时刻$S_t$状态的分布。
+\end{theorem}
+\begin{proof}
+    \begin{align*}
+        &\frac{\mathrm{d}}{\mathrm{d}\theta_\pi} \rho(\theta_\pi)\\
+        =& (1 - \gamma)\int_{s} p_0(s) \frac{\mathrm{d}}{\mathrm{d}\theta_\pi} Q(s, \pi(s; \theta_\pi); \theta_\pi) \mathrm{d}s \\
+        =& (1 - \gamma)\int_{s} p_0(s) \nabla_{\theta_\pi} \pi(s; \theta_\pi)\cdot \nabla_{a = \pi(s;\theta_\pi)} Q(s, a; \theta_\pi)\mathrm{d}s\\
+            &+ (1 - \gamma)\int_{s} p_0(s) \frac{\mathrm{d}}{\mathrm{d}\theta_\pi} Q(s, a; \theta_\pi) \big\vert_{a = \pi(s;\theta_\pi)} \mathrm{d} s \\
+        =& (1 - \gamma)\int_{s} p_0(s) \nabla_{\theta_\pi} \pi(s; \theta_\pi)\cdot \nabla_{a = \pi(s; \theta_\pi)} Q(s, a; \theta_\pi) \mathrm{d}s\\
+            &+ (1 - \gamma) \int_{s} p_0(s) \frac{\mathrm{d}}{\mathrm{d}\theta_\pi} 
+            \bigg[r(s, a) \\
+            & + \gamma \int_{s'} p(s' \vert s, a)\pi(s',\pi(s';\theta_\pi); \theta_\pi)\bigg]
+            \bigg\vert_{a=\pi(s;\theta_\pi)} \mathrm{d} s' \mathrm{d} s\\
+        =& (1 - \gamma)\int_{s} p_0(s) \nabla_{\theta_\pi} \pi(s; \theta_\pi)\cdot \nabla_{a=\pi(s;\theta_\pi)} Q(s, a; \theta_\pi)\mathrm{d}s\\
+            &+ (1 - \gamma)\gamma\int_{s} p_0(s) \int_{s'}p(s'\vert s, a) \\
+            & \frac{\mathrm{d}}{\mathrm{d}\theta_\pi} 
+            Q(s',\pi(s';\theta_\pi); \theta_\pi)
+            \bigg\vert_{a=\pi(s;\theta_\pi)} \mathrm{d} s' \mathrm{d} s\\
+        =& (1 - \gamma) \int_{s} p_0(s) \nabla_{\theta_\pi} \pi(s; \theta_\pi)\cdot \nabla_a Q(s, a; \theta_\pi)\big\vert_{a=\pi(s;\theta_\pi)}\mathrm{d} s\\
+            &+ (1 - \gamma)\int_{s} \gamma p_1(s;\theta_\pi)\frac{\mathrm{d}}{\mathrm{d}\theta_\pi} 
+            Q(s,\pi(s;\theta_\pi); \theta_\pi) \mathrm{d} s\\
+        =& \quad \vdots \\
+        =& (1 - \gamma) \int_{s} \sum^{\infty}_{t=0}\gamma^t p_t(s;\theta_\pi)
+            \nabla_{\theta_\pi} \pi(s; \theta_\pi)
+            \cdot \nabla_{a = \pi(s;\theta_\pi)} Q(s, a; \theta_\pi)\mathrm{d} s\\
+        =& \int_{s} p_{\gamma}(s;\theta_\pi) 
+            \nabla_{\theta_\pi} \pi(s; \theta_\pi)
+            \cdot \nabla_{a=\pi(s;\theta_\pi)} Q(s, a; \theta_\pi) \mathrm{d}s\\
+        =& \mathbb{E}_{s \sim p_{\gamma}(\cdot;\theta_\pi)}
+            \bigg[\nabla_{\theta_\pi} \pi(s; \theta_\pi) \cdot \nabla_{a = \pi(s; \theta_\pi)} Q(s, a; \theta_\pi)\bigg].
+    \end{align*}
+\end{proof}
+
+确定性策略梯度定理要求奖励函数关于动作的梯度存在，因此仅在连续动作空间的强化学习算法中存在。同时，确定性策略梯度需要获得Q函数关于动作的一阶导数，它对估计Q函数的要求比随机策略梯度的要求高得多。更进一步地说，确定性策略梯度需要更多的样本，才能被准确地估计。所以目前没有同策略的确定性策略梯度优化算法，而本章将介绍一个基于确定性策略的重要算法——深度确定性策略优化算法。
+
+\subsubsection{深度确定性策略优化算法的原理及主要流程}
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总的优化步数$N$, 可以交互采样的马尔可夫决策过程的环境$env$。}
+    \KwOut{最优策略$\pi(s; \theta^*_\pi)$。}
+
+    \SetKwFunction{Update}{Update}
+    \SetKwProg{Fn}{Function}{:}{end}
+    \Fn{\Update{$\mathcal{D} = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$}}{
+        构造动作集合$\{a'_i = \pi(s'_i;\theta_{\pi2})\}^{m}_{i=1}$\;
+        $\mathcal{L}(\theta_{Q1}) = \frac{1}{2m}\sum^{m}_{i=1} \{r_i + \gamma Q(s'_i, a'_i;\theta_{Q2}) - Q(s_i, a_1;\theta_{Q1}) \}^2$\;
+        $\mathcal{L}(\theta_{Q2}) = \frac{1}{2} \Vert \theta_{Q2} - \theta_{Q1} \Vert^2$\;
+        $\mathcal{L}(\theta_{\pi1}) = -\frac{1}{m} \sum^{m}_{i=1} Q(s_i, \pi(s;\theta_{\pi1});\theta_{Q1})$\;
+        $\mathcal{L}(\theta_{\pi2}) = \frac{1}{2} \Vert \theta_{\pi2} - \theta_{\pi1} \Vert^2$\;
+        使用Adam梯度下降法来优化$\mathcal{L}(\theta_{\pi1})$和$\mathcal{L}(\theta_{Q1})$\;
+        使用梯度下降法来优化$\mathcal{L}(\theta_{\pi2})$和$\mathcal{L}(\theta_{Q2})$\;
+    }
+    随机初始化一个空的经验池$\mathcal{D}$，两个同构策略函数$\pi(s; \theta_{\pi1})$和$\pi(s; \theta_{\pi2})$，以及两个同构的值函数$Q(s, a; \theta_{Q1})$和$Q(s, a; \theta_{Q2})$\;
+    \For(){$n = 1,2, \ldots, N$}{
+        执行策略$\pi_{\epsilon}(s; \theta_{\pi1})$从环境$env$中采集$m$条状态转移样本$\mathcal{D}_n = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$，
+        其中$\pi_{\epsilon}(s; \theta_{\pi1}) = \mathcal{N}(\pi(s;\theta_{\pi1}), \epsilon)$\;
+        $\mathcal{D} = \mathcal{D} \cup \mathcal{D}_n$\;
+        \For(){$n' = 1, 2, \ldots, N'$}{
+            从$\mathcal{D}$中采集$m'$条样本$\mathcal{D}_{n'} = \{(s_i, a_i, r_i, s'_i)\}^{m'}_{i=1}$\;
+            \Update{$\mathcal{D}_{n'}$}\;
+        }
+    }
+    \KwRet{$\pi(s; \theta_{\pi1})$}
+    \caption{深度确定性策略优化算法}
+    \label{alg:ddpg}
+\end{algorithm}
+
+深度确定性策略优化算法是一个结合了确定性策略梯度定理和批判执行算法框架\cite{konda2000actor}的异策略优化算法。由于它是第一个解决连续动作空间的强化学习算法的异策略算法，并且由于它的原理非常简单且易于实现，使得它在强化学习领域使用频率很高\cite{ho2016generative,andrychowicz2017hindsight,feher2019hybrid}。
+
+深度确定性策略优化算法的核心是构建了如下两个优化目标：
+\begin{numcases}{}
+    \max_{\theta_\pi} \mathcal{L}(\theta_\pi) = \mathbb{E}_{s \sim \mathcal{D}} [Q(s, \pi(s; \theta_\pi); \theta_Q)],\\
+    \begin{aligned}
+    \min_{\theta_Q} \mathcal{L}(\theta_Q) = \mathbb{E}_{(s, a, r) \sim \mathcal{D}} \{&r + \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a)} \\
+    & [Q(s', \pi(s';\theta_\pi); \theta_Q)] - Q(s, a; \theta_Q)\}^2,
+    \end{aligned}
+\end{numcases}
+其中 $\mathcal{D} = \{(s, a, r, s')\}$ 表示经验池。
+
+接下来我们对算法的原理进行简单的解释，对DDPG可以有两个角度的理解。首先从确定性策略梯度的角度来理解：第一个优化目标来自确定性策略梯度定理。当我们对$\mathcal{L}(\theta_\pi)$进行梯度上升优化时，近似于对$\rho(\theta_\pi)$进行梯度上升优化；第二个优化目标来自贝尔曼等式定理。当$\mathcal{L}(\theta_Q)$求解到最优时，我们可以认为$Q(s, a;\theta_Q) \approx Q(s, a;\theta_\pi)$。
+
+接着，深度确定策略优化算法也可以从最优贝尔曼等式的角度来理解。第一个优化目标实际上是求解子问题$\max_{a} Q(s, a)$，它正对应Q-Learning算法中的取最值操作。由于在连续动作空间的强化学习问题中，我们无法直接获得最优动作，所以我们构造了一个优化问题来求解它。当$\mathcal{L}(\theta_\pi)$求解到最优时，第二个优化目标则对应着最优贝尔曼等式。根据最优贝尔曼等式定理，当第二个优化目标同时也求到最优时，我们所获得的最终策略就是马尔科夫决策问题的最优策略。
+
+深度确定策略优化算法的整体流程如伪代码\ref{alg:ddpg}所示。在实际的算法中，算法为了增加策略的探索性来充分探索环境，和环境交互的策略实际上是一个以$\pi(s;\theta_\pi)$为均值，超参数$\epsilon$为方差的高斯分布。
+
+\subsection{双延迟深度确定性策略优化算法}
+
+本小节将介绍一个重要的深度确定性策略优化算法的改进算法——双延迟深度确定性策略优化算法\cite{fujimoto2018addressing}（Twin Delayed Deterministic Policy Optimization，TD3）。它提出了几个经验性的技术来降低深度确定性策略优化算法的误差，显著提高了算法的性能。
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总的优化步数$N$, 可以交互采样的马尔可夫决策过程的环境$env$。}
+    \KwOut{最优策略$\pi(s; \theta^*_\pi)$。}
+
+    \SetKwFunction{Update}{Update}
+    \SetKwProg{Fn}{Function}{:}{end}
+    \Fn{\Update{$\mathcal{D} = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$}}{
+        构造动作集合$\{a'_i \sim \pi_{\epsilon}(s'_i;\theta_{\pi2})\}^{m}_{i=1}$\;
+        $\{Q_1(s_i, a_i) = \min(Q(s_i, a_i; \theta_{Q1A}), Q(s_i, a_i; \theta_{Q1B}))\}^{m}_{i=1}$\;
+        $\{Q_2(s'_i, a'_i) = \min(Q(s'_i, a'_i; \theta_{Q2A}), Q(s'_i, a'_i; \theta_{Q2B}))\}^{m}_{i=1}$\;
+        $\mathcal{L}(\theta_{Q1A}, \theta_{Q1B}) = \frac{1}{2m}\sum^{m}_{i=1} \{r_i + \gamma Q_2(s'_i, a'_i) - Q_1(s_i, a_1) \}^2$\;
+        $\mathcal{L}(\theta_{Q2A}, \theta_{Q2B}) = \frac{1}{2} \Vert \theta_{Q2A} - \theta_{Q1A} \Vert^2 + \frac{1}{2} \Vert \theta_{Q2B} - \theta_{Q2B} \Vert^2$\;
+        $\mathcal{L}(\theta_{\pi1}) = -\frac{1}{m} \sum^{m}_{i=1} Q(s_i, \pi(s;\theta_{\pi1});\theta_{Q1})$\;
+        $\mathcal{L}(\theta_{\pi2}) = \frac{1}{2} \Vert \theta_{\pi2} - \theta_{\pi1} \Vert^2$\;
+        使用Adam梯度下降法来优化$\mathcal{L}(\theta_{\pi1})$和$\mathcal{L}(\theta_{Q1A}, \theta_{Q1B})$\;
+        使用梯度下降法来优化$\mathcal{L}(\theta_{\pi2})$和$\mathcal{L}(\theta_{Q2A}, \theta_{Q2B})$（$\theta_{\pi2}$的步长相对小一些）\;
+    }
+    随机初始化一个空的经验池$\mathcal{D}$，两个同构策略函数$\pi(s; \theta_{\pi1})$和$\pi(s; \theta_{\pi2})$，以及四个同构的值函数$Q(s, a; \theta_{Q1A})$、$Q(s, a; \theta_{Q1B})$、$Q(s, a; \theta_{Q2A})$和$Q(s, a; \theta_{Q2B})$\;
+    \For(){$n = 1,2, \ldots, N$}{
+        执行策略$\pi_{\epsilon}(s; \theta_{\pi1})$从环境$env$中采集$m$条状态转移样本$\mathcal{D}_n = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$，
+        其中$\pi_{\epsilon}(s; \theta_{\pi1}) = \mathcal{N}(\pi(s;\theta_{\pi1}), \epsilon)$\;
+        $\mathcal{D} = \mathcal{D} \cup \mathcal{D}_n$\;
+        \For(){$n' = 1, 2, \ldots, N'$}{
+            从$\mathcal{D}$中采集$m'$条样本$\mathcal{D}_{n'} = \{(s_i, a_i, r_i, s'_i)\}^{m'}_{i=1}$\;
+            \Update{$\mathcal{D}_{n'}$}\;
+        }
+    }
+    \KwRet{$\pi(s; \theta_{\pi1})$}
+    \caption{双延迟深度确定性策略优化算法}
+    \label{alg:td3}
+\end{algorithm}
+
+第一个技术使用截断Q函数来解决参数化的Q函数过高估计引发的一系列问题。在Q-Learning算法中，被错误地高估的Q函数对算法的负面影响远大于被错误地低估地Q函数。如果参数化的Q函数对某个状态动作$(s', a')$过高估计时，最大化策略$\pi_Q(s') \in \max_{a'} Q(s', a')$也会高概率地执行动作$a'$。通常我们使用时序差分误差
+\begin{equation}
+    \delta(s, a) = r(s', a') + \gamma Q(s', a') - Q(s, a)
+\end{equation}
+作为参考值修正$Q(s, a)$。所以对$(s', a')$状态的Q值高估时，同时也会使得整条状态转移链的值都被高估，最后导致策略被错误引导向高估的动作，从而无法充分地探索环境，最终算法陷入到一个性能较差的局部最优策略附近。但是，当$Q(s', a')$被错误地低估时，策略会在发现采取其他动作的效果都不理想的时候，开始尝试动作$a'$。此时，策略已经对环境做出了充分地探索，相对来说更不容易陷入到一个局部最优策略。
+
+因为深度确定性策略优化算法也是一个贪心地尝试当前$Q(s, a)$值更大动作的算法，所以这个现象在深度确定性策略优化算法中也会出现。双延迟深度确定性策略优化算法则使用了一个Double-Q函数的技巧来解决这个问题。具体的做法是：随机初始化两个同构的Q函数$Q(s, a;\theta_{QA})$和$Q(s, a; \theta_{QB})$，实际使用到的参数化的Q函数的形式是
+\begin{equation}
+    Q(s, a) = \min(Q(s, a;\theta_{QA}), Q(s, a; \theta_{QB})).
+\end{equation}
+从概率的角度来看，$Q(s, a; \theta_{QA})$和$Q(s, a; \theta_{QB})$同时出现过高估计的概率小于单个Q函数，所以它能够降低过高估计Q值的风险。
+
+第二个技巧是对目标策略光滑化，用于降低算法的方差。在深度确定性策略优化算法中，使用高斯噪声来提高策略的探索性，即使用策略
+\begin{equation}
+    \pi_{\epsilon}(s;\theta_\pi) = \mathcal{N}(\pi(s;\theta_\pi), \epsilon)
+\end{equation}
+来和环境交互。本算法将它扩展到了Q函数的优化目标中，本算法不再求解$\pi(s;\theta_\pi)$对应的值函数$Q(s, a; \theta_\pi)$，而是求解$\pi_{\epsilon}(s; \theta_\pi)$对应的值函数$Q(s, a; \theta_\pi, \epsilon)$。也就是说，Q函数的优化目标就变成了
+\begin{equation}
+    \begin{aligned}
+    \min_{\theta_Q} \mathcal{L}(\theta_Q) = \mathbb{E}_{(s, a, r) \sim \mathcal{D}} \{&r + \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), \epsilon' \sim \mathcal{N}(0, \epsilon)} \\
+    &[Q(s', \pi(s';\theta_\pi) + \epsilon'; \theta_Q)] - Q(s, a; \theta_Q)\}^2.
+    \end{aligned}
+\end{equation}
+从损失函数的角度来看，本双延迟深度确定性策略优化算法中，Q函数不再逼近某个确定性策略的$Q(s', \pi(s';\theta_\pi);\theta_Q)$而是它周围的邻域的Q值的平均值$\mathbb{E}_{\epsilon'}[Q(s', \pi(s';\theta_\pi+\epsilon';\theta_Q)]$。所以$Q(s, a;\theta_\pi,\epsilon)$相比于$Q(s, a; \theta_\pi)$更加光滑。
+
+第三个技巧是延迟更新目标策略函数。在深度确定性优化算法中，算法等速率地更新目标策略函数和目标Q函数（$\mathcal{L}(\theta_{\pi2})$ 和 $\mathcal{L}(\theta_{Q2})$）。双延迟深度确定性策略优化算法建议：目标策略函数的更新速度应该比目标Q函数的更新速度要慢一些。
+
+综上，双延迟深度确定性策略优化算法的整体流程如伪代码\ref{alg:td3}所示。
+
+\subsection{最大熵批判执行算法}
+
+
+本小节将介绍一个目前在实验环境表现最好的基准算法——最大熵批判执行算法\cite{haarnoja2018soft}（Soft Actor-Critic，SAC）。本小节将先讲述最大熵批判执行算法的理论基础——最大熵马尔可夫决策过程\cite{haarnoja2017reinforcement,todorov2008general,kappen2005path}（Maximum Entropy Markov Decision Processes），然后再介绍最大熵批判执行算法的基本原理和具体流程。
+
+\subsubsection{最大熵马尔可夫决策过程}
+
+本小节将介绍最大熵马尔可夫决策过程，它是一个结合了最大熵理论和马尔可夫决策过程的数学模型。
+
+首先回顾对于一个马尔可夫决策过程$\mathcal{MDP} = \{\mathcal{S}, \mathcal{A}, p, p_0, R, \gamma\}$，我们的优化目标是
+\begin{equation}
+    \begin{aligned}
+    \max_{\pi} \rho(\pi) =& (1 - \gamma) \mathbb{E}_{\tau \sim \mathcal{MDP}(\pi)} \bigg[\sum^{\infty}_{t=0} \gamma^t R(s_t, a_t)\bigg]\\
+    =& \mathbb{E}_{s \sim p_{\gamma}(\cdot; \pi), a \sim \pi(\cdot \vert s)}[R(s, a)].
+    \end{aligned}
+\end{equation}
+其中$p_\gamma(s; \pi) = (1 - \gamma) \sum^{\infty}_{t=0} \gamma^t p_t(s; \pi)$，并且$p_t(s; \pi)$表示在策略$\pi$对应的马尔科夫链$\mathcal{MDP}(\pi)$中$t$时刻$S_t$状态的分布。而最大熵马尔可夫决策过程则是使用一个和策略的动作分布的熵（$\mathcal{H}(p) = -\int_x p(x) \ln p(x) \mathrm{d} x$）有关的正则项来构造的新的优化目标
+\begin{equation}
+    \begin{aligned}
+    \max_{\pi} &\rho_{\mathcal{H}}(\pi) \\
+    =& \mathbb{E}_{s \sim p_{\gamma}(\cdot; \pi), a \sim \pi(\cdot \vert s)}[R(s, a)] + \alpha \mathbb{E}_{s \sim p_{\gamma}(\cdot; \pi)}[\mathcal{H}(\pi(\cdot \vert s))]\\
+    =& \mathbb{E}_{s \sim p_{\gamma}(\cdot; \pi), a \sim \pi(\cdot \vert s)}\bigg[R(s, a) + \alpha \mathcal{H}(\pi(\cdot \vert s))\bigg]\\
+    =& (1 - \gamma) \mathbb{E}_{\tau \sim \mathcal{MDP}(\pi)} \bigg[\sum^{\infty}_{t=0} \gamma^t \bigg(R(s_t, a_t) + \alpha \mathcal{H}(\pi(\cdot \vert s))\bigg)\bigg].
+    \end{aligned}
+\end{equation}
+这是一个牵一发而动全身的改变。当我们获得了最大熵马尔可夫决策过程优化目标$\rho_{\mathcal{H}}(\pi)$，同时改变了其他相关函数（Q函数、V函数、贝尔曼操作和最优贝尔曼等式等）。在最大熵马尔可夫决策过程框架中，我们需要定义新的函数。
+
+我们先来研究一种最符合直觉的定义。首先是状态动作值函数定义为
+\begin{equation}
+    Q_{\pi}(s, a) = \mathbb{E}_{\tau \sim \mathcal{MDP}(\pi)} \bigg[\sum^{\infty}_{t=0} \gamma^t \bigg(R(s_t, a_t) + \alpha \mathcal{H}(\pi(\cdot \vert s_t))\bigg) \bigg\vert s_0 = s, a_0 = a\bigg].
+\end{equation}
+那么状态值函数的定义可以是
+\begin{equation}
+    V_{\pi}(s) = \mathbb{E}_{a \sim \pi(\cdot \vert s)}[Q_{\pi}(s, a)].
+\end{equation}
+对于任意的函数$Q \in \mathbb{R}^{\vert \mathcal{S} \times \mathcal{A} \vert }$，对应的最大熵贝尔曼操作为
+\begin{equation}
+    \begin{aligned}
+    T_{\pi}Q (s, a) =& R(s, a) + \alpha \mathcal{H}(\pi(\cdot \vert s)) \\
+    & + \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')}[Q(s', a')],
+    \end{aligned}
+\end{equation}
+以及对应的最大熵最优贝尔曼操作为
+\begin{equation}
+    \begin{aligned}
+    TQ (s, a) = \max_{\pi} & R(s, a) + \alpha \mathcal{H}(\pi(\cdot \vert s)) \\
+    & + \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')}[Q(s', a')].
+    \end{aligned}
+\end{equation}
+问题就出现在最优贝尔曼操作上。在这个版本的定义中，最优贝尔曼操作计算上比较困难，并且比较难继续分析。
+
+为了解决上面版本中最优贝尔曼操作计算困难的问题，最大熵马尔可夫决策过程\cite{haarnoja2017reinforcement,schulman2017equivalence}定义了另一个版本的符号。首先是\textbf{最大熵的状态动作值函数}定义为
+\begin{equation}
+    \begin{aligned}
+    Q_{\pi,\mathcal{H}}(s, a) =& \mathbb{E}_{\tau \sim \mathcal{MDP}(\pi)} \bigg[R(s_0, a_0) \\
+    &+ \sum^{\infty}_{t=1} \gamma^t \bigg(R(s_t, a_t) + \alpha \mathcal{H}(\pi(\cdot \vert s_t))\bigg) \bigg\vert s_0 = s, a_0 = a\bigg].
+    \end{aligned}
+\end{equation}
+那么\textbf{最大熵状态值函数}的定义是
+\begin{equation}
+    V_{\pi,\mathcal{H}}(s) = \mathbb{E}_{a \sim \pi(\cdot \vert s)} [Q_{\pi,\mathcal{H}}(s, a)] + \alpha \mathcal{H}(\pi(\cdot \vert s)).
+\end{equation}
+对于任意的函数$Q \in \mathbb{R}^{\vert \mathcal{S} \times \mathcal{A} \vert}$，对应的\textbf{最大熵贝尔曼操作}是
+\begin{equation}
+    \begin{aligned}
+    T_{\pi,\mathcal{H}}Q (s, a) = R(s, a)
+    + & \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')} \\
+    &[Q(s', a') + \alpha \mathcal{H}(\pi(\cdot \vert s'))],
+    \end{aligned}
+\end{equation}
+以及对应的\textbf{最大熵最优贝尔曼操作}为
+\begin{equation}
+    \begin{aligned}
+    T_{\mathcal{H}}Q (s, a) = \max_{\pi} R(s, a) + & \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')} \\
+    & [Q(s', a') + \alpha \mathcal{H}(\pi(\cdot \vert s')) ].
+    \end{aligned}
+\end{equation}
+
+\begin{lemma}
+    对于任意的函数$Q\in\mathbb{R}^{\vert \mathcal{S} \times \mathcal{A}}\vert$，对它做最大熵最优贝尔曼操作时，设
+    \begin{equation}
+        \begin{aligned}
+        \pi_Q = \arg\max_{\pi} R(s, a) + & \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')} \\
+        & [Q(s', a') + \alpha \mathcal{H}(\pi(\cdot \vert s')) ],
+        \end{aligned}
+    \end{equation}
+    那么
+    \begin{equation}
+        \pi_Q(a \vert s) = \frac{\exp[Q(s, a)/\alpha]}{\int_{a''} \exp [Q(s, a'')/\alpha] \mathrm{d} a''}.
+    \end{equation}
+\end{lemma}
+\begin{proof}
+    要求解分布$\pi(\cdot \vert s)$，我们要求解带约束的子问题
+    \begin{equation}
+        \begin{aligned}
+        \max_{\pi(\cdot \vert s)}& \int \pi(a \vert s) [Q(s, a) - \alpha \ln \pi(a \vert s)] \mathrm{d} a, \\
+        s.t.& \int \pi(a \vert s) \mathrm{d} a = 1.
+        \end{aligned}
+    \end{equation}
+    我们使用拉格朗日乘子法将带约束的优化问题转化为
+    \begin{equation}
+        \max_{\pi(\cdot \vert s)} \min_{\lambda \ne 0} \int \pi(a \vert s) [Q(s, a) - \alpha \ln \pi(a \vert s)] \mathrm{d} a + \lambda\bigg(\int_a \pi(a \vert s) \mathrm{d} a - 1\bigg).
+    \end{equation}
+    根据强对偶性，我们得到等价的问题
+    \begin{equation}
+        \min_{\lambda \ne 0}\max_{\pi(\cdot \vert s)} \int \pi(a \vert s) [Q(s, a) - \alpha \ln \pi(a \vert s)] \mathrm{d} a + \lambda\bigg(\int_a \pi(a \vert s) \mathrm{d} a - 1\bigg).
+    \end{equation}
+    我们先求解内部子问题$\max_{\pi(\cdot \vert s)}$，对$\pi(a \vert s)$求偏导可得它的最优值满足
+    \begin{equation}
+        Q(s, a) - \alpha - \alpha \ln \pi^*(a \vert s) + \lambda = 0,
+    \end{equation}
+    即
+    \begin{equation}\label{equ:max-entropy-piQ}
+        \pi^*(a \vert s) = \exp[Q(s, a)/\alpha - 1 + \lambda/\alpha].
+    \end{equation}
+    接下来，我们不显式求解$\lambda^*$，而是利用$\lambda^*$一定满足的性质。因为$\pi^*(a \vert s)$必须是一个分布，所以
+    \begin{equation}
+        \int_{a''} \pi^*(a'' \vert s) \mathrm{d} a'' = \int_{a''} \exp[Q(s, a'')/\alpha - 1 + \lambda^*/\alpha] \mathrm{d} {a''} = 1,
+    \end{equation}
+    转化可得
+    \begin{equation}
+        \exp(1 - \lambda^*/\alpha) = \int_{a''} \exp[Q(s, a'')/\alpha]\mathrm{d} {a''}.
+    \end{equation}
+    带入\eqref{equ:max-entropy-piQ}式可得
+    \begin{equation}
+        \pi^*(a \vert s) = \frac{\exp[Q(s, a)/\alpha]}{\int_{a''} \exp [Q(s, a'')/\alpha] \mathrm{d} a''}.
+    \end{equation}
+\end{proof}
+
+\begin{theorem}[最大熵贝尔曼等式]
+    最大熵贝尔曼操作$T_{\pi,\mathcal{H}}$是收缩映射，并且存在唯一的不动点$Q_{\mathcal{H}}$，满足
+    \begin{equation}
+        Q_{\pi,\mathcal{H}} = T_{\pi, \mathcal{H}} Q_{\pi,\mathcal{H}}.
+    \end{equation}
+\end{theorem}
+\begin{proof}
+    首先，根据$Q_{\pi,\mathcal{H}}$的定义可知它是$T_{\pi,\mathcal{H}}$的不动点。
+    所以，我们只需要证明最大熵贝尔曼操作时收缩映射，那么就可以证明最大熵贝尔曼操作存在唯一的不动点。
+
+    设任意两个向量$Q_1, Q_2\in \mathbb{R}^{\vert \mathcal{S} \times \mathcal{A} \vert}$，那么
+    \begin{equation}
+        \begin{aligned}
+            &\Vert T_{\pi, \mathcal{H}} Q_1 - T_{\pi, \mathcal{H}} Q_2 \Vert \\
+            =& \gamma \Vert \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s')} [Q_1 - Q_2] \Vert \\
+            \le& \gamma \Vert Q_1 - Q_2 \Vert.
+        \end{aligned}
+    \end{equation}
+\end{proof}
+
+\begin{theorem}[最大熵最优贝尔曼等式]
+    最大熵最优贝尔曼操作$T_{\mathcal{H}}$是收缩映射，并且存在唯一的不动点$Q^*_{\mathcal{H}}$，满足
+    \begin{equation}
+        Q^*_{\mathcal{H}} = T_{\mathcal{H}} Q^*_{\mathcal{H}},
+    \end{equation}
+    其中$Q^*_{\mathcal{H}} = Q^*_{\pi^*_{\mathcal{H}}, \mathcal{H}}$，并且$\pi^*_{\mathcal{H}} = \arg\max_{\pi} \rho_{\mathcal{H}}(\pi)$。
+\end{theorem}
+
+至此，我们可以进入到最大熵生成批判算法的介绍。
+
+\subsubsection{最大熵批判执行算法的原理及主要流程}
+
+\begin{algorithm}[htbp]
+    \LinesNumbered
+    \KwIn{总的优化步数$N$, 可以交互采样的马尔可夫决策过程的环境$env$。}
+    \KwOut{最优策略$\pi(s; \theta^*_\pi)$。}
+
+    \SetKwFunction{Update}{Update}
+    \SetKwProg{Fn}{Function}{:}{end}
+    \Fn{\Update{$\mathcal{D} = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$}}{
+        构造动作集合$\{a'_i \sim \pi(s'_i;\theta_{\pi})\}^{m}_{i=1}$\;
+        $\{Q_1(s_i, a_i) = \min(Q(s_i, a_i; \theta_{Q1A}), Q(s_i, a_i; \theta_{Q1B}))\}^{m}_{i=1}$\;
+        $\{Q_2(s'_i, a'_i) = \min(Q(s'_i, a'_i; \theta_{Q2A}), Q(s'_i, a'_i; \theta_{Q2B}))\}^{m}_{i=1}$\;
+        $\mathcal{L}(\theta_{Q1A}, \theta_{Q1B}) = \frac{1}{2m}\sum^{m}_{i=1} \{r_i + \gamma [Q_2(s'_i, a'_i)-\alpha \ln \pi(a'_i \vert s'_i;\theta_\pi)] - Q_1(s_i, a_1) \}^2$\;
+        $\mathcal{L}(\theta_{Q2A}, \theta_{Q2B}) = \frac{1}{2} \Vert \theta_{Q2A} - \theta_{Q1A} \Vert^2 + \frac{1}{2} \Vert \theta_{Q2B} - \theta_{Q2B} \Vert^2$\;
+        采样$\{\epsilon_i \sim p\}^{m}_{i=1}$\;
+        $\mathcal{L}(\theta_{\pi}) = \frac{1}{m} \sum^{m}_{i=1}\{\alpha \ln \pi(f(s_i,\epsilon_i;\theta_\pi)\vert s;\theta_\pi) - \min[Q(s_i, f(s_i,\epsilon_i;\theta_\pi);\theta_{Q1}), Q(s_i, f(s_i, \epsilon_i;\theta_\pi);\theta_{Q2})]\}$\;
+        使用Adam梯度下降法来优化$\mathcal{L}(\theta_{\pi})$和$\mathcal{L}(\theta_{Q1A}, \theta_{Q1B})$\;
+        使用梯度下降法来优化$\mathcal{L}(\theta_{Q2A}, \theta_{Q2B})$\;
+    }
+    随机初始化一个空的经验池$\mathcal{D}$，两个同构策略函数$\pi(s; \theta_{\pi})$，以及四个同构的值函数$Q(s, a; \theta_{Q1A})$、$Q(s, a; \theta_{Q1B})$、$Q(s, a; \theta_{Q2A})$和$Q(s, a; \theta_{Q2B})$\;
+    \For(){$n = 1,2, \ldots, N$}{
+        执行策略$\pi(a \vert s; \theta_{\pi})$从环境$env$中采集$m$条状态转移样本$\mathcal{D}_n = \{(s_i, a_i, r_i, s'_i)\}^{m}_{i=1}$\;
+        $\mathcal{D} = \mathcal{D} \cup \mathcal{D}_n$\;
+        \For(){$n' = 1, 2, \ldots, N'$}{
+            从$\mathcal{D}$中采集$m'$条样本$\mathcal{D}_{n'} = \{(s_i, a_i, r_i, s'_i)\}^{m'}_{i=1}$\;
+            \Update{$\mathcal{D}_{n'}$}\;
+        }
+    }
+    \KwRet{$\pi(s; \theta_{\pi})$}
+    \caption{最大熵批判执行算法}
+    \label{alg:sac}
+\end{algorithm}
+
+本小节将介绍一个结合最大熵马尔可夫决策过程和生成批判算法框架的异策略优化算法——最大熵批判执行算法\cite{haarnoja2018soft}（Soft Actor-Critic，SAC）。本算法是目前在连续动作空间的实验环境中效果最好的异策略优化算法\cite{baselines,SpinningUp2018}。
+
+最大熵批判执行算法的核心是构建了如下两个优化目标
+\begin{numcases}{}
+    \label{equ:sac-actor}
+    \min_{\theta_\pi} \mathcal{L}(\theta_\pi) = \mathbb{E}_{s \sim \mathcal{D}} [D_{KL}(\pi(\cdot \vert s; \theta_\pi) \Vert \pi_{\mathcal{H}}(\cdot \vert s; \theta_Q))],\\
+    \label{equ:sac-critic}
+    \begin{aligned}
+    \min_{\theta_Q} \mathcal{L}(\theta_Q) = \mathbb{E}_{(s, a, r) \sim \mathcal{D}} \{&r + \gamma \mathbb{E}_{s' \sim p(\cdot \vert s, a), a' \sim \pi(\cdot \vert s';\theta_\pi)}[Q(s', a'; \theta_Q)\\
+    & - \alpha \ln \pi(a' \vert s';\theta_\pi) ] - Q(s, a; \theta_Q)\}^2,
+    \end{aligned}
+\end{numcases}
+其中 $\mathcal{D} = \{(s, a, r, s')\}$ 表示经验池，并且
+\begin{equation}
+    \pi_{\mathcal{H}}(s, a; \theta_Q) = \frac{\exp[Q(s, a; \theta_Q)/\alpha]}{\int_{a''} \exp\{\exp[Q(s, a; \theta_Q)/\alpha]\}\mathrm{d} a''}.
+\end{equation}
+我们解释一下最大熵批判执行算法的核心是求解最大熵最优贝尔曼等式的解，而\eqref{equ:sac-critic}式正来自最大熵最优贝尔曼等式。但是在连续动作空间的强化学习问题设定下，$\pi_{\mathcal{H}}(s, a;\theta_Q)$无法直接求解，所以最大熵批判执行算法通过构造一个优化问题\eqref{equ:sac-critic}式来求解$\pi_{\mathcal{H}}(s, a;\theta_Q)$。
+
+我们无法直接求解损失函数\eqref{equ:sac-actor}式，所以我们需要对它进行进一步地变换
+\begin{equation}
+    \begin{aligned}
+    \mathcal{L}(\theta_\pi) =& \mathbb{E}_{s \sim \mathcal{D}} [D_{KL}(\pi(\cdot \vert s; \theta_\pi) \Vert \pi_{\mathcal{H}}(\cdot \vert s; \theta_Q))]\\
+    =& \mathbb{E}_{s \sim \mathcal{D}, a \sim \pi(a \vert s; \theta_\pi)} \bigg[\ln \pi(a \vert s; \theta_\pi) - \ln \frac{\exp[Q(s, a; \theta_Q)/\alpha]}{\int_{a''} \exp[Q(s, a'';\theta_Q)/\alpha] \mathrm{d} a''}\bigg]\\
+    =& \mathbb{E}_{s \sim \mathcal{D}, \epsilon \sim p} \bigg[\ln \pi[f(s, \epsilon;\theta_\pi) \vert s; \theta_\pi] - \ln \frac{\exp[Q(f(s,\epsilon;\theta_\pi), a; \theta_Q)/\alpha]}{\int_{a''} \exp[Q(s, a'';\theta_Q)/\alpha] \mathrm{d} a''}\bigg]\\
+    =& \mathbb{E}_{s \sim \mathcal{D}, \epsilon \sim p} \bigg[\ln \pi[f(s, \epsilon;\theta_\pi) \vert s; \theta_\pi] - Q[f(s,\epsilon;\theta_\pi), a; \theta_Q]/\alpha\bigg] + F(\theta_Q)
+    \end{aligned}
+\end{equation}
+其中对策略函数$\pi(a \vert s;\theta_\pi)$使用了重参数化技术，具体是将原本的参数化的策略重参数化为$a = f(s, \epsilon;\theta_\pi)$，其中$\epsilon$服从某个先验分布$p$。这时，我们就可以对策略损失函数使用随机梯度优化算法进行优化。最大熵批判执行算法的整体流程如伪代码\ref{alg:sac}所示。
+
+\subsection{本章小结}
+
+本章介绍了三个基于批判执行框架的算法：一是提出最早、使用范围最广的异策略优化算法——深度确定性策略优化算法；二是深度确定性策略优化算法的改进算法——双延迟深度确定性策略优化算法；三是当前解决连续动作强化学习问题性能最好的异策略优化算法——最大熵批判执行算法。三个算法本质上将强化学习问题建模为一个两目标的优化问题。相比于基于策略梯度的同策略优化算法，本章的批判执行算法大大降低了采样复杂度，在仿真环境中取得了巨大的成功，但是由于异策略算法缺乏相应的理论保障，还未在现实世界中得到应用。
